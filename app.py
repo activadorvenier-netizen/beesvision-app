@@ -52,6 +52,27 @@ def _is_visita_valida(value: Any) -> bool:
     }
 
 
+def _build_task_id(row: pd.Series, index: int) -> str:
+
+    fecha = (
+        ""
+        if pd.isna(row["Fecha"])
+        else str(int(row["Fecha"]))
+    )
+
+    poc = (
+        ""
+        if pd.isna(row["POC ID"])
+        else str(row["POC ID"]).replace(".0", "")
+    )
+
+    detalle = clean_text(
+        row["Detalle Tarea"]
+    )
+
+    return f"{fecha}_{poc}_{detalle}_{index}"
+
+
 # =====================================================
 # LOAD DATA
 # =====================================================
@@ -113,12 +134,23 @@ def _load_data(path: Path) -> pd.DataFrame:
     ].copy()
 
     # =====================================================
-    # ID ÚNICO REAL
+    # IDs ÚNICOS
     # =====================================================
 
     filtered = filtered.reset_index(drop=True)
 
-    filtered["row_id"] = range(1, len(filtered) + 1)
+    filtered["row_id"] = range(
+        1,
+        len(filtered) + 1
+    )
+
+    filtered["task_id"] = filtered.apply(
+        lambda row: _build_task_id(
+            row,
+            row.name
+        ),
+        axis=1
+    )
 
     return filtered
 
@@ -134,7 +166,9 @@ def _get_df() -> pd.DataFrame | None:
     if _cached_df is None and UPLOADED_FILE.exists():
 
         try:
-            _cached_df = _load_data(UPLOADED_FILE)
+            _cached_df = _load_data(
+                UPLOADED_FILE
+            )
 
         except Exception:
             return None
@@ -185,11 +219,16 @@ def api_upload():
     f.save(str(UPLOADED_FILE))
 
     try:
-        _cached_df = _load_data(UPLOADED_FILE)
+        _cached_df = _load_data(
+            UPLOADED_FILE
+        )
 
     except ValueError as e:
 
-        UPLOADED_FILE.unlink(missing_ok=True)
+        UPLOADED_FILE.unlink(
+            missing_ok=True
+        )
+
         _cached_df = None
 
         return jsonify({
@@ -253,21 +292,31 @@ def api_tasks():
     ]
 
     if start_date is not None:
-        result = result[result["Fecha"] >= start_date]
+        result = result[
+            result["Fecha"] >= start_date
+        ]
 
     if end_date is not None:
-        result = result[result["Fecha"] <= end_date]
+        result = result[
+            result["Fecha"] <= end_date
+        ]
 
     response_rows = []
 
-    for row in result.to_dict(orient="records"):
+    for row in result.to_dict(
+        orient="records"
+    ):
 
         poc_raw = row.get("POC ID")
         fecha_raw = row.get("Fecha")
 
         response_rows.append({
 
-            "row_id": int(row["row_id"]),
+            "row_id": int(
+                row["row_id"]
+            ),
+
+            "task_id": row["task_id"],
 
             "fecha": (
                 ""
