@@ -1,0 +1,730 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bees Vision - Validación</title>
+  <style>
+    :root {
+      --bg: #f7f8fb;
+      --card: #ffffff;
+      --text: #1f2937;
+      --muted: #6b7280;
+      --primary: #f59e0b;
+      --danger: #dc2626;
+      --success: #16a34a;
+      --dark: #111827;
+      --border: #e5e7eb;
+      --blue-dark: #1e3a5f;
+      --blue-mid: #2c5282;
+      --blue-light: #8ba8c4;
+      --blue-lighter: #c3d4e5;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    /* ── Upload Screen ── */
+    .upload-screen {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    .upload-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 48px 40px;
+      text-align: center;
+      max-width: 460px;
+      width: 100%;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.07);
+    }
+    .upload-icon { font-size: 3rem; margin-bottom: 16px; }
+    .upload-title {
+      font-size: 1.4rem;
+      font-weight: bold;
+      margin-bottom: 8px;
+    }
+    .upload-subtitle {
+      color: var(--muted);
+      font-size: 0.95rem;
+      margin-bottom: 28px;
+      line-height: 1.5;
+    }
+    .drop-zone {
+      border: 2px dashed var(--border);
+      border-radius: 12px;
+      padding: 32px 20px;
+      cursor: pointer;
+      transition: border-color 0.2s, background 0.2s;
+      margin-bottom: 16px;
+    }
+    .drop-zone:hover, .drop-zone.drag-over {
+      border-color: var(--primary);
+      background: #fef9ec;
+    }
+    .drop-zone-inner { pointer-events: none; }
+    .drop-zone-icon { font-size: 2rem; margin-bottom: 8px; }
+    .drop-zone-text {
+      color: var(--muted);
+      font-size: 0.88rem;
+    }
+    .btn-pick {
+      background: var(--primary);
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      padding: 12px 28px;
+      font-size: 1rem;
+      font-weight: bold;
+      cursor: pointer;
+      width: 100%;
+      margin-top: 4px;
+    }
+    .btn-pick:hover { opacity: 0.9; }
+    .upload-status {
+      margin-top: 14px;
+      font-size: 0.9rem;
+      min-height: 20px;
+    }
+    .upload-status.error { color: var(--danger); }
+    .upload-status.success { color: var(--success); }
+
+    /* ── Main App ── */
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 16px;
+    }
+    .top-bar {
+      display: flex;
+      justify-content: flex-end;
+      margin-bottom: 6px;
+    }
+    .btn-change-file {
+      background: transparent;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 5px 12px;
+      font-size: 0.82rem;
+      color: var(--muted);
+      cursor: pointer;
+      width: auto;
+    }
+    .btn-change-file:hover { background: var(--bg); color: var(--text); }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px;
+      margin-bottom: 12px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.04);
+    }
+    h1 { margin: 0 0 8px; font-size: 1.3rem; }
+    .muted { color: var(--muted); font-size: 0.92rem; }
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 10px;
+      margin-top: 10px;
+    }
+    .field label {
+      display: block;
+      font-size: 0.88rem;
+      margin-bottom: 6px;
+      color: var(--muted);
+    }
+    select, input[type="date"], button {
+      width: 100%;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px;
+      font-size: 0.95rem;
+      background: #fff;
+    }
+    button { cursor: pointer; background: var(--dark); color: #fff; border: none; }
+    button:hover { opacity: 0.93; }
+
+    /* Card Layout */
+    .task-card {
+      display: flex;
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px;
+      margin-bottom: 16px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.02);
+      gap: 20px;
+    }
+    .task-info { flex: 1; display: flex; flex-direction: column; gap: 12px; }
+    .task-image { flex-shrink: 0; }
+    .task-meta { line-height: 1.6; font-size: 0.95rem; }
+    .img-thumb {
+      width: 300px;
+      height: 450px;
+      object-fit: cover;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      cursor: pointer;
+      display: block;
+    }
+    .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    .actions button {
+      width: auto;
+      padding: 8px 12px;
+      font-size: 0.85rem;
+      border-radius: 999px;
+      font-weight: bold;
+    }
+    .btn-invalid  { background: #dc2626; color: #fff; }
+    .btn-objecion { background: #16a34a; color: #fff; }
+    .btn-fraud    { background: #000000; color: #fff; }
+    .btn-clear {
+      background: #9ca3af;
+      color: #fff;
+      width: auto !important;
+      padding: 4px 10px;
+      font-size: 0.8rem;
+      align-self: flex-start;
+    }
+    .tag-row { display: flex; align-items: flex-start; gap: 8px; margin-top: 6px; flex-wrap: wrap; }
+    .tag {
+      display: inline-block;
+      width: auto;
+      margin-top: 0;
+      padding: 4px 8px;
+      border-radius: 999px;
+      font-size: 0.85rem;
+      font-weight: bold;
+      background: #eef2ff;
+      color: #3730a3;
+      align-self: flex-start;
+      white-space: nowrap;
+    }
+    .obs-container { flex: 1; display: flex; flex-direction: column; }
+    .obs-input {
+      width: 100%;
+      flex: 1;
+      min-height: 100px;
+      padding: 10px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-size: 0.9rem;
+      resize: vertical;
+      font-family: inherit;
+      background: #fafafa;
+    }
+    .obs-input:focus { outline: none; border-color: var(--primary); background: #fff; }
+    .empty {
+      padding: 30px;
+      text-align: center;
+      color: var(--muted);
+      border: 1px dashed var(--border);
+      border-radius: 8px;
+    }
+    .btn-excel {
+      margin-top: 10px;
+      background: #15803d;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      padding: 12px 24px;
+      font-size: 1rem;
+      font-weight: bold;
+      cursor: pointer;
+      display: inline-block;
+      width: auto;
+    }
+    .btn-excel:hover { opacity: 0.9; }
+    dialog {
+      border: none;
+      border-radius: 10px;
+      padding: 0;
+      width: min(95vw, 900px);
+    }
+    dialog::backdrop { background: rgba(0,0,0,0.65); }
+    .modal-img { max-width: 100%; max-height: 88vh; display: block; }
+    .modal-top {
+      display: flex;
+      justify-content: flex-end;
+      padding: 6px;
+      background: #111;
+    }
+    .modal-top button {
+      width: auto;
+      background: #fff;
+      color: #111;
+      padding: 6px 10px;
+      border-radius: 8px;
+      font-size: 0.85rem;
+    }
+    @media (max-width: 768px) {
+      .grid { grid-template-columns: 1fr; }
+      h1 { font-size: 1.1rem; }
+      .upload-card { padding: 32px 20px; }
+      .task-card { flex-direction: column-reverse; }
+      .task-image { width: 100%; display: flex; justify-content: center; }
+      .img-thumb { width: 100%; max-width: 300px; height: auto; aspect-ratio: 2/3; }
+    }
+
+    /* ── Logo ── */
+    .app-logo {
+      display: block;
+      margin: 0 auto 20px;
+      width: 200px;
+      max-width: 80%;
+      height: auto;
+    }
+    .upload-logo {
+      display: block;
+      margin: 0 auto 18px;
+      width: 180px;
+      max-width: 70%;
+      height: auto;
+    }
+
+    /* ── Filter Card (blue branding) ── */
+    .filter-card {
+      background: linear-gradient(135deg, var(--blue-dark) 0%, var(--blue-mid) 100%);
+      border: 1px solid var(--blue-mid);
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 12px;
+      box-shadow: 0 4px 16px rgba(30,58,95,0.25);
+    }
+    .filter-card h1 {
+      color: #ffffff;
+      margin: 0 0 6px;
+      font-size: 1.3rem;
+    }
+    .filter-card .muted {
+      color: var(--blue-lighter);
+      font-size: 0.92rem;
+    }
+    .filter-card .field label {
+      color: var(--blue-lighter);
+      font-size: 0.88rem;
+      margin-bottom: 6px;
+    }
+    .filter-card select,
+    .filter-card input[type="date"] {
+      background: rgba(255,255,255,0.12);
+      border: 1px solid rgba(255,255,255,0.3);
+      color: #ffffff;
+      border-radius: 8px;
+      padding: 10px;
+      font-size: 0.95rem;
+      width: 100%;
+    }
+    .filter-card select option {
+      background: var(--blue-dark);
+      color: #fff;
+    }
+    .filter-card select:focus,
+    .filter-card input[type="date"]:focus {
+      outline: none;
+      border-color: var(--blue-lighter);
+      background: rgba(255,255,255,0.18);
+    }
+    .filter-card input[type="date"]::-webkit-calendar-picker-indicator {
+      filter: invert(1);
+    }
+    .btn-search {
+      background: rgba(255,255,255,0.18) !important;
+      color: #ffffff !important;
+      border: 2px solid rgba(255,255,255,0.45) !important;
+      border-radius: 8px !important;
+      padding: 11px 10px !important;
+      font-size: 0.97rem !important;
+      font-weight: bold !important;
+      width: 100% !important;
+      cursor: pointer;
+      transition: background 0.18s;
+    }
+    .btn-search:hover {
+      background: rgba(255,255,255,0.28) !important;
+      opacity: 1 !important;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ══ PANTALLA DE CARGA DE ARCHIVO ══ -->
+  <div id="upload-screen" class="upload-screen" style="display:none;">
+    <div class="upload-card">
+      <img src="{{ url_for('static', filename='logo.png') }}" alt="Grupo Venier" class="upload-logo">
+      <div class="upload-icon">📊</div>
+      <div class="upload-title">Bees Vision</div>
+      <div class="upload-subtitle">
+        Subí el archivo <strong>.xlsx</strong> que descargaste del Power BI<br>para comenzar a trabajar.
+      </div>
+
+      <div id="drop-zone" class="drop-zone">
+        <div class="drop-zone-inner">
+          <div class="drop-zone-icon">📂</div>
+          <div class="drop-zone-text">Arrastrá el archivo acá o hacé click para seleccionarlo</div>
+        </div>
+      </div>
+
+      <input type="file" id="file-input" accept=".xlsx" style="display:none;">
+      <button class="btn-pick" id="pick-btn">Seleccionar archivo .xlsx</button>
+
+      <div id="upload-status" class="upload-status"></div>
+    </div>
+  </div>
+
+  <!-- ══ APLICACIÓN PRINCIPAL ══ -->
+  <div id="main-app" class="container" style="display:none;">
+
+    <div class="top-bar">
+      <button class="btn-change-file" id="changeFileBtn">Cambiar archivo</button>
+    </div>
+
+    <div style="text-align:center; margin-bottom: 14px;">
+      <img src="{{ url_for('static', filename='logo.png') }}" alt="Grupo Venier" class="app-logo">
+    </div>
+
+    <div class="card filter-card">
+      <h1>Bees Vision - Validación de Tareas</h1>
+      <div class="muted">Filtrá por supervisor y rango de fechas (formato interno YYYYMMDD).</div>
+      <div class="grid">
+        <div class="field">
+          <label for="supervisor">Supervisor</label>
+          <select id="supervisor">
+            <option value="">Selecciona supervisor</option>
+            {% for sup_id, sup_name in supervisors.items() %}
+              <option value="{{ sup_id }}">{{ sup_name }} ({{ sup_id }})</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="field">
+          <label for="startDate">Desde</label>
+          <input id="startDate" type="date">
+        </div>
+        <div class="field">
+          <label for="endDate">Hasta</label>
+          <input id="endDate" type="date">
+        </div>
+      </div>
+      <div class="grid" style="grid-template-columns: 1fr;">
+        <button id="searchBtn" class="btn-search">Buscar tareas</button>
+      </div>
+    </div>
+
+    <div class="card" style="background: transparent; border: none; box-shadow: none; padding: 0;">
+      <div id="resultInfo" class="muted" style="margin-bottom: 12px;">Sin resultados cargados.</div>
+
+      <div id="tasks-container">
+        <div class="empty">Seleccioná supervisor y fecha para ver tareas.</div>
+      </div>
+
+      <div id="excelSection" style="display:none; margin-top:16px; text-align: right;">
+        <button class="btn-excel" id="excelBtn">Generar Excel</button>
+      </div>
+    </div>
+  </div>
+
+  <dialog id="imgDialog">
+    <div class="modal-top">
+      <button id="closeDialog" type="button">Cerrar</button>
+    </div>
+    <img id="modalImg" class="modal-img" alt="Imagen ampliada">
+  </dialog>
+
+  <!-- SheetJS CDN para generación de Excel en el cliente -->
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+
+  <script>
+    // ── Refs ──────────────────────────────────────────────────────────────
+    const uploadScreen  = document.getElementById("upload-screen");
+    const mainApp       = document.getElementById("main-app");
+    const dropZone      = document.getElementById("drop-zone");
+    const fileInput     = document.getElementById("file-input");
+    const pickBtn       = document.getElementById("pick-btn");
+    const uploadStatus  = document.getElementById("upload-status");
+    const changeFileBtn = document.getElementById("changeFileBtn");
+
+    const tasksContainer = document.getElementById("tasks-container");
+    const resultInfo     = document.getElementById("resultInfo");
+    const supervisorEl   = document.getElementById("supervisor");
+    const startDateEl    = document.getElementById("startDate");
+    const endDateEl      = document.getElementById("endDate");
+    const searchBtn      = document.getElementById("searchBtn");
+    const imgDialog      = document.getElementById("imgDialog");
+    const modalImg       = document.getElementById("modalImg");
+    const closeDialog    = document.getElementById("closeDialog");
+    const excelSection   = document.getElementById("excelSection");
+    const excelBtn       = document.getElementById("excelBtn");
+
+    const ACTIONS_KEY = "bees_vision_actions_v1";
+    let currentRows = [];
+
+    // ── Navegación entre pantallas ────────────────────────────────────────
+    function showUploadScreen() {
+      uploadStatus.textContent = "";
+      uploadStatus.className = "upload-status";
+      uploadScreen.style.display = "flex";
+      mainApp.style.display = "none";
+    }
+
+    function showMainApp() {
+      uploadScreen.style.display = "none";
+      mainApp.style.display = "block";
+    }
+
+    async function checkHasFile() {
+      try {
+        const res = await fetch("/api/has_file");
+        const data = await res.json();
+        if (data.has_file) showMainApp();
+        else showUploadScreen();
+      } catch (_) {
+        showUploadScreen();
+      }
+    }
+
+    // ── Upload ────────────────────────────────────────────────────────────
+    async function uploadFile(file) {
+      if (!file || !file.name.toLowerCase().endsWith(".xlsx")) {
+        uploadStatus.textContent = "El archivo debe ser un .xlsx";
+        uploadStatus.className = "upload-status error";
+        return;
+      }
+      uploadStatus.textContent = "Subiendo...";
+      uploadStatus.className = "upload-status";
+
+      const formData = new FormData();
+      formData.append("file", file);
+
+      try {
+        const res = await fetch("/api/upload", { method: "POST", body: formData });
+        const data = await res.json();
+        if (!res.ok) {
+          uploadStatus.textContent = data.error || "Error al subir el archivo.";
+          uploadStatus.className = "upload-status error";
+          return;
+        }
+        uploadStatus.textContent = `Archivo cargado correctamente. ${data.rows} tareas encontradas.`;
+        uploadStatus.className = "upload-status success";
+        setTimeout(showMainApp, 900);
+      } catch (_) {
+        uploadStatus.textContent = "Error de conexión con el servidor.";
+        uploadStatus.className = "upload-status error";
+      }
+    }
+
+    // Drag & drop
+    dropZone.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      dropZone.classList.add("drag-over");
+    });
+    dropZone.addEventListener("dragleave", () => dropZone.classList.remove("drag-over"));
+    dropZone.addEventListener("drop", (e) => {
+      e.preventDefault();
+      dropZone.classList.remove("drag-over");
+      const file = e.dataTransfer.files[0];
+      if (file) uploadFile(file);
+    });
+
+    // File picker
+    pickBtn.addEventListener("click", () => fileInput.click());
+    dropZone.addEventListener("click", () => fileInput.click());
+    fileInput.addEventListener("change", () => {
+      if (fileInput.files[0]) uploadFile(fileInput.files[0]);
+      fileInput.value = "";
+    });
+
+    changeFileBtn.addEventListener("click", showUploadScreen);
+
+    // ── Acciones en localStorage ──────────────────────────────────────────
+    function getStoredActions() {
+      try { return JSON.parse(localStorage.getItem(ACTIONS_KEY) || "{}"); }
+      catch (_) { return {}; }
+    }
+
+    function saveAction(rowId, actionName) {
+      const data = getStoredActions();
+      const existing = data[rowId] || {};
+      data[rowId] = { action: actionName, observaciones: existing.observaciones || "", updatedAt: new Date().toISOString() };
+      localStorage.setItem(ACTIONS_KEY, JSON.stringify(data));
+    }
+
+    function saveObservaciones(rowId, text) {
+      const data = getStoredActions();
+      const existing = data[rowId] || {};
+      data[rowId] = { action: existing.action || "", observaciones: text, updatedAt: new Date().toISOString() };
+      localStorage.setItem(ACTIONS_KEY, JSON.stringify(data));
+    }
+
+    function clearAction(rowId) {
+      const data = getStoredActions();
+      delete data[rowId];
+      localStorage.setItem(ACTIONS_KEY, JSON.stringify(data));
+    }
+
+    // ── Helpers de fecha ──────────────────────────────────────────────────
+    function ymdFromDateInput(v) {
+      if (!v) return null;
+      return Number(v.replaceAll("-", ""));
+    }
+
+    function formatYmd(ymd) {
+      const s = String(ymd || "");
+      if (s.length !== 8) return s;
+      return s.slice(0, 4) + "-" + s.slice(4, 6) + "-" + s.slice(6, 8);
+    }
+
+    // ── Render de tareas ──────────────────────────────────────────────────
+    function renderRows(rows) {
+      const actions = getStoredActions();
+      if (!rows.length) {
+        tasksContainer.innerHTML = '<div class="empty">No hay tareas con ese filtro.</div>';
+        excelSection.style.display = "none";
+        return;
+      }
+
+      tasksContainer.innerHTML = rows.map((r) => {
+        const key = r.task_key;
+        const act = actions[key] || {};
+        const tag = act.action
+          ? `<div class="tag-row"><div class="tag">Estado: ${act.action}</div><button class="btn-clear" data-clear="${key}" title="Quitar estado seleccionado">✕ Limpiar</button></div>`
+          : "";
+        const obsValue = (act.observaciones || "").replaceAll('"', "&quot;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+        const safeDetalle = (r.detalle_tarea || "").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+        const imgCell = r.imagen
+          ? `<img src="${r.imagen}" alt="img" class="img-thumb" data-img="${r.imagen}">`
+          : '<div class="img-thumb" style="display:flex; align-items:center; justify-content:center; background:#eee; color:#888;">Sin imagen</div>';
+
+        return `
+          <div class="task-card">
+            <div class="task-info">
+              <div class="task-meta">
+                <strong>Fecha:</strong> ${formatYmd(r.fecha)}<br>
+                <strong>Promotor:</strong> ${r.promotor || ""}<br>
+                <strong>POC ID:</strong> ${r.poc_id || ""}<br>
+                <strong>Tarea:</strong> ${safeDetalle}
+              </div>
+              <div class="actions">
+                <button class="btn-invalid"  data-action="Inválida"       data-row="${key}">Inválida</button>
+                <button class="btn-objecion" data-action="Pedir Objeción" data-row="${key}">Pedir Objeción</button>
+                <button class="btn-fraud"    data-action="Fraude"         data-row="${key}">Fraude</button>
+              </div>
+              ${tag}
+              <div class="obs-container">
+                <textarea class="obs-input" data-obs-row="${key}" placeholder="Escribe observaciones...">${obsValue}</textarea>
+              </div>
+            </div>
+            <div class="task-image">${imgCell}</div>
+          </div>
+        `;
+      }).join("");
+
+      excelSection.style.display = "block";
+    }
+
+    // ── Carga de tareas ───────────────────────────────────────────────────
+    async function loadTasks() {
+      const supervisorId = supervisorEl.value;
+      if (!supervisorId) { alert("Seleccioná un supervisor."); return; }
+
+      const startYmd = ymdFromDateInput(startDateEl.value);
+      const endYmd   = ymdFromDateInput(endDateEl.value);
+
+      const params = new URLSearchParams({ supervisor_id: supervisorId });
+      if (startYmd) params.set("start_date", String(startYmd));
+      if (endYmd)   params.set("end_date",   String(endYmd));
+
+      resultInfo.textContent = "Cargando...";
+      const res = await fetch("/api/tasks?" + params.toString());
+      if (!res.ok) { resultInfo.textContent = "Error al cargar tareas."; return; }
+      const rows = await res.json();
+      currentRows = rows;
+      resultInfo.textContent = `Total tareas: ${rows.length}`;
+      renderRows(rows);
+    }
+
+    // ── Generar Excel ─────────────────────────────────────────────────────
+    function generateExcel() {
+      if (!currentRows.length) return;
+      const actions = getStoredActions();
+
+      const wsData = [["Fecha", "Promotor", "POC ID", "Detalle Tarea", "Imagen URL", "Status", "Observaciones"]];
+      currentRows.forEach((r) => {
+        const act = actions[r.task_key] || {};
+        wsData.push([
+          formatYmd(r.fecha), r.promotor || "", r.poc_id || "",
+          r.detalle_tarea || "", r.imagen || "",
+          act.action || "", act.observaciones || ""
+        ]);
+      });
+
+      const wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.aoa_to_sheet(wsData);
+      ws["!cols"] = [
+        { wch: 12 }, { wch: 20 }, { wch: 14 }, { wch: 30 },
+        { wch: 50 }, { wch: 18 }, { wch: 30 }
+      ];
+      XLSX.utils.book_append_sheet(wb, ws, "Tareas");
+
+      const supervisorName = supervisorEl.options[supervisorEl.selectedIndex]?.text || "supervisor";
+      const filename = `bees_vision_${supervisorName.replace(/\s+/g, "_")}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      XLSX.writeFile(wb, filename);
+    }
+
+    // ── Event listeners ───────────────────────────────────────────────────
+    searchBtn.addEventListener("click", loadTasks);
+    excelBtn.addEventListener("click", generateExcel);
+
+    let obsDebounce = null;
+    tasksContainer.addEventListener("input", (ev) => {
+      const target = ev.target;
+      if (!(target instanceof HTMLTextAreaElement)) return;
+      const rowId = target.getAttribute("data-obs-row");
+      if (!rowId) return;
+      clearTimeout(obsDebounce);
+      obsDebounce = setTimeout(() => saveObservaciones(rowId, target.value), 400);
+    });
+
+    tasksContainer.addEventListener("click", (ev) => {
+      const target = ev.target;
+      if (!(target instanceof HTMLElement)) return;
+
+      if (target.matches("img.img-thumb")) {
+        modalImg.src = target.getAttribute("data-img") || "";
+        imgDialog.showModal();
+        return;
+      }
+
+      if (target.matches("button[data-action][data-row]")) {
+        const actionName = target.getAttribute("data-action");
+        const rowId = target.getAttribute("data-row");
+        if (!actionName || !rowId) return;
+        const obsEl = tasksContainer.querySelector(`textarea[data-obs-row="${rowId}"]`);
+        if (obsEl) saveObservaciones(rowId, obsEl.value);
+        saveAction(rowId, actionName);
+        loadTasks();
+      }
+
+      if (target.matches("button[data-clear]")) {
+        const rowId = target.getAttribute("data-clear");
+        if (!rowId) return;
+        clearAction(rowId);
+        loadTasks();
+      }
+    });
+
+    closeDialog.addEventListener("click", () => imgDialog.close());
+    imgDialog.addEventListener("click", (ev) => { if (ev.target === imgDialog) imgDialog.close(); });
+
+    // ── Arranque ──────────────────────────────────────────────────────────
+    checkHasFile();
+  </script>
+</body>
+</html>
