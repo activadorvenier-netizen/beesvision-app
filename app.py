@@ -1,4 +1,243 @@
 from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+
+import pandas as pd
+from flask import Flask, jsonify, render_template, request
+
+BASE_DIR = Path(__file__).resolve().parent
+
+UPLOAD_DIR = BASE_DIR / "uploads"
+UPLOAD_DIR.mkdir(exist_ok=True)
+
+UPLOADED_FILE = UPLOAD_DIR / "data.xlsx"
+
+SUPERVISORS = {
+    14: "Bruno Del Popolo",
+    17: "Franco Vivani",
+    41: "Claudio Raposo",
+}
+
+app = Flask(__name__)
+
+# Cache del dataframe
+_cached_df: pd.DataFrame | None = None
+
+
+# =====================================================
+# HELPERS
+# =====================================================
+
+def clean_text(value: Any) -> str:
+    if pd.isna(value):
+        return ""
+    return str(value).strip()
+
+
+def _is_visita_valida(value: Any) -> bool:
+    if pd.isna(value):
+        return False
+
+    if isinstance(value, (int, float)):
+        return float(value) == 1.0
+
+    text = str(value).strip().upper()
+
+    return text in {
+        "VERDADERO",
+        "TRUE",
+        "1",
+        "1.0"
+    }
+
+
+# =====================================================
+# LOAD DATA
+# =====================================================
+
+def _load_data(path: Path) -> pd.DataFrame:
+
+    df = pd.read_excel(path, engine="openpyxl")
+
+    required = [
+        "Fecha",
+        "Promotor",
+        "POC ID",
+        "Detalle Tarea",
+        "Imagen",
+        "Completada",
+        "Validada",
+        "Visita Valida",
+        "Supervisor ID",
+    ]
+
+    missing = [c for c in required if c not in df.columns]
+
+    if missing:
+        raise ValueError(
+            f"Columnas faltantes en el Excel: {missing}"
+        )
+
+    df = df.copy()
+
+    df["Fecha"] = pd.to_numeric(
+        df["Fecha"],
+        errors="coerce"
+    ).astype("Int64")
+
+    df["Completada"] = pd.to_numeric(
+        df["Completada"],
+        errors="coerce"
+    )
+
+    df["Validada"] = pd.to_numeric(
+        df["Validada"],
+        errors="coerce"
+    )
+
+    df["Supervisor ID"] = pd.to_numeric(
+        df["Supervisor ID"],
+        errors="coerce"
+    ).astype("Int64")
+
+    df["VisitaValidaBool"] = df[
+        "Visita Valida"
+    ].apply(_is_visita_valida)
+
+    filtered = df[
+        (df["Completada"] == 1.0)
+        & (df["Validada"] == 0.0)
+        & (df["VisitaValidaBool"])
+        & (df["Supervisor ID"].isin(SUPERVISORS.keys()))
+    ].copy()
+
+    # =====================================================
+    # ID ÚNICO REAL
+    # =====================================================
+
+    filtered = filtered.reset_index(drop=True)
+
+    filtered["row_id"] = range(1, len(filtered) + 1)
+
+    return filtered
+
+
+# =====================================================
+# CACHE
+# =====================================================
+
+def _get_df() -> pd.DataFrame | None:
+
+    global _cached_df
+
+    if _cached_df is None and UPLOADED_FILE.exists():
+
+        try:
+            _cached_df = _load_data(UPLOADED_FILE)
+
+        except Exception:
+            return None
+
+    return _cached_df
+
+
+# =====================================================
+# ROUTES
+# =====================================================
+
+@app.route("/")
+def index() -> str:
+
+    return render_template(
+        "index.html",
+        supervisors=SUPERVISORS
+    )
+
+
+@app.route("/api/has_file")
+def api_has_file():
+
+    return jsonify({
+        "has_file": UPLOADED_FILE.exists()
+    })
+
+
+@app.route("/api/upload", methods=["POST"])
+def api_upload():
+
+    global _cached_df
+
+    if "file" not in request.files:
+
+        return jsonify({
+            "error": "No se envió ningún archivo"
+        }), 400
+
+    f = request.files["file"]
+
+    if not f.filename.lower().endswith(".xlsx"):
+
+        return jsonify({
+            "error": "El archivo debe ser .xlsx"
+        }), 400
+
+    f.save(str(UPLOADED_FILE))
+
+    try:
+        _cached_df = _load_data(UPLOADED_FILE)
+
+    except ValueError as e:
+
+        UPLOADED_FILE.unlink(missing_ok=True)
+        _cached_df = None
+
+        return jsonify({
+            "error": str(e)
+        }), 422
+
+    return jsonify({
+        "ok": True,
+        "rows": len(_cached_df)
+    })
+
+
+@app.route("/api/supervisors")
+def api_supervisors():
+
+    items = [
+        {
+            "id": sid,
+            "name": name
+        }
+        for sid, name in SUPERVISORS.items()
+    ]
+
+    return jsonify(items)
+
+
+@app.route("/api/tasks")
+def api_tasks():
+
+    df = _get_df()
+
+    if df is None:
+
+        return jsonify({
+            "error": "No hay archivo cargado"
+        }), 404
+
+    supervisor_id = request.args.get(
+        "supervisor_id",
+        type=int
+    )
+
+    start_date = request.args.get(
+        "start_date",
+        type=int
+    )
+
+    end_date = request.args.get(
         "end_date",
         type=int
     )
