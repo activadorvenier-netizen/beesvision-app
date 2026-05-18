@@ -591,8 +591,8 @@
       }
 
       tasksContainer.innerHTML = rows.map((r) => {
-        const key = r.task_key;
-        const act = actions[key] || {};
+        const key = r.row_id;
+        const act = actions[r.row_id] || {};
         const tag = act.action
           ? `<div class="tag-row"><div class="tag">Estado: ${act.action}</div><button class="btn-clear" data-clear="${key}" title="Quitar estado seleccionado">✕ Limpiar</button></div>`
           : "";
@@ -657,7 +657,7 @@
 
       const wsData = [["Fecha", "Promotor", "POC ID", "Detalle Tarea", "Imagen URL", "Status", "Observaciones"]];
       currentRows.forEach((r) => {
-        const act = actions[r.task_key] || {};
+    const act = actions[r.row_id] || {};
         wsData.push([
           formatYmd(r.fecha), r.promotor || "", r.poc_id || "",
           r.detalle_tarea || "", r.imagen || "",
