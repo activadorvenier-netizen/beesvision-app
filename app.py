@@ -531,13 +531,16 @@ def api_export_reviews():
 
 
 # =====================================================
-# CIERRE DE MES (CON TODOS LOS CAMPOS)
+# CIERRE DE MES (CON TODOS LOS CAMPOS) - CORREGIDO
 # =====================================================
 
 @app.route("/api/close_month", methods=["POST"])
 @login_required
 def api_close_month():
     """Exportar todas las revisiones con todos los campos y limpiar la base de datos"""
+    # ✅ CORRECCIÓN: 'global' declarado al inicio de la función
+    global _cached_df, _data_loaded
+    
     try:
         supervisor_id = session.get('supervisor_id')
         supervisor_name = session.get('supervisor_name')
@@ -663,8 +666,7 @@ def api_close_month():
         if file_path.exists():
             file_path.unlink()
         
-        # Resetear cache
-        global _cached_df, _data_loaded
+        # Resetear cache (ya declarado al inicio)
         _cached_df = None
         _data_loaded = False
         
