@@ -391,52 +391,104 @@ def api_supervisors():
     items = [{"id": sid, "name": name} for sid, name in SUPERVISORS.items()]
     return jsonify(items)
 
+# app.py - Reemplazar las funciones de exportación
+
 # =====================================================
-# EXPORTAR REVISIONES
+# EXPORTAR REVISIONES (REPORTE SEMANAL)
 # =====================================================
 
 @app.route("/api/export_reviews", methods=["GET"])
 @login_required
 def api_export_reviews():
-    """Exportar todas las revisiones a Excel"""
+    """Exportar todas las revisiones a Excel con todos los campos"""
     try:
         supervisor_id = session.get('supervisor_id')
         supervisor_name = session.get('supervisor_name')
         mes = _current_mes or get_mes_actual()
         
+        # Obtener todas las revisiones del supervisor
         reviews = db.get_all_reviews(supervisor_id, mes)
         
         if not reviews:
             return jsonify({"error": "No hay revisiones para exportar"}), 404
         
-        export_data = []
-        for review in reviews:
-            export_data.append({
-                "Task ID": review["task_id"],
-                "Status Asignado": review["status"],
-                "Observaciones": review.get("observaciones", ""),
-                "Supervisor": review["supervisor_name"],
-                "Fecha Revisión": review["fecha_revision"],
-                "Mes": review.get("mes_revision", mes)
-            })
+        # Obtener datos completos de las tareas revisadas
+        if _cached_df is None or not _data_loaded:
+            # Si no hay datos del Excel, solo exportar lo que está en la BD
+            export_data = []
+            for review in reviews:
+                export_data.append({
+                    "Fecha Ejecución": "",
+                    "POC ID": "",
+                    "Detalle Tarea": "",
+                    "Imagen": "",
+                    "Promotor": "",
+                    "Status": review["status"],
+                    "Observaciones": review.get("observaciones", ""),
+                    "Supervisor": review["supervisor_name"],
+                    "Fecha Revisión": review["fecha_revision"],
+                    "Nota": "Datos del Excel no disponibles"
+                })
+            df_export = pd.DataFrame(export_data)
+        else:
+            # Crear un diccionario para mapear task_id con datos del Excel
+            task_data = {}
+            for _, row in _cached_df.iterrows():
+                task_data[row["task_id"]] = {
+                    "fecha": row.get("Fecha", ""),
+                    "promotor": row.get("Promotor", ""),
+                    "poc_id": row.get("POC ID", ""),
+                    "detalle_tarea": row.get("Detalle Tarea", ""),
+                    "imagen": row.get("Imagen", "")
+                }
+            
+            # Construir datos para el Excel con TODOS los campos
+            export_data = []
+            for review in reviews:
+                task_id = review["task_id"]
+                task_info = task_data.get(task_id, {})
+                
+                export_data.append({
+                    "Fecha Ejecución": task_info.get("fecha", ""),
+                    "POC ID": task_info.get("poc_id", ""),
+                    "Detalle Tarea": task_info.get("detalle_tarea", ""),
+                    "Imagen": task_info.get("imagen", ""),
+                    "Promotor": task_info.get("promotor", ""),
+                    "Status": review["status"],
+                    "Observaciones": review.get("observaciones", ""),
+                    "Supervisor": review["supervisor_name"],
+                    "Fecha Revisión": review["fecha_revision"]
+                })
+            df_export = pd.DataFrame(export_data)
         
-        df_export = pd.DataFrame(export_data)
-        
+        # Crear archivo Excel en memoria
         output = io.BytesIO()
         
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            # Hoja 1: Detalle de revisiones con TODOS los campos
             df_export.to_excel(writer, sheet_name='Revisiones', index=False)
             
-            if not df_export.empty and 'Status Asignado' in df_export.columns:
-                df_status = df_export.groupby('Status Asignado').size().reset_index(name='Cantidad')
+            # Hoja 2: Resumen por status
+            if not df_export.empty and 'Status' in df_export.columns:
+                df_status = df_export.groupby('Status').size().reset_index(name='Cantidad')
                 df_status = df_status.sort_values('Cantidad', ascending=False)
+                
+                # Agregar total
                 total_row = pd.DataFrame({
-                    'Status Asignado': ['TOTAL'],
+                    'Status': ['TOTAL'],
                     'Cantidad': [df_status['Cantidad'].sum()]
                 })
                 df_status = pd.concat([df_status, total_row], ignore_index=True)
                 df_status.to_excel(writer, sheet_name='Resumen por Status', index=False)
             
+            # Hoja 3: Resumen por promotor
+            if not df_export.empty and 'Promotor' in df_export.columns and 'Status' in df_export.columns:
+                df_promotor = df_export.groupby(['Promotor', 'Status']).size().unstack(fill_value=0)
+                df_promotor['Total'] = df_promotor.sum(axis=1)
+                df_promotor = df_promotor.sort_values('Total', ascending=False)
+                df_promotor.to_excel(writer, sheet_name='Resumen por Promotor')
+            
+            # Hoja 4: Información del reporte
             info_data = {
                 'Supervisor': [supervisor_name],
                 'ID Supervisor': [supervisor_id],
@@ -447,6 +499,7 @@ def api_export_reviews():
             df_info = pd.DataFrame(info_data)
             df_info.to_excel(writer, sheet_name='Info Reporte', index=False)
             
+            # Autoajustar columnas en todas las hojas
             for sheet_name in writer.sheets:
                 worksheet = writer.sheets[sheet_name]
                 for column in worksheet.columns:
@@ -463,7 +516,7 @@ def api_export_reviews():
         
         output.seek(0)
         
-        filename = f"revisiones_{supervisor_name}_{mes}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+        filename = f"reporte_revisiones_{supervisor_name}_{mes}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
         
         return send_file(
             output,
@@ -476,14 +529,15 @@ def api_export_reviews():
         print(f"Error al exportar: {e}")
         return jsonify({"error": str(e)}), 500
 
+
 # =====================================================
-# CIERRE DE MES
+# CIERRE DE MES (CON TODOS LOS CAMPOS)
 # =====================================================
 
 @app.route("/api/close_month", methods=["POST"])
 @login_required
 def api_close_month():
-    """Exportar todas las revisiones y limpiar la base de datos (cierre de mes)"""
+    """Exportar todas las revisiones con todos los campos y limpiar la base de datos"""
     try:
         supervisor_id = session.get('supervisor_id')
         supervisor_name = session.get('supervisor_name')
@@ -494,39 +548,112 @@ def api_close_month():
         if not reviews:
             return jsonify({"error": "No hay revisiones para exportar"}), 404
         
-        # Preparar datos para Excel
-        export_data = []
-        for review in reviews:
-            export_data.append({
-                "Task ID": review["task_id"],
-                "Status Asignado": review["status"],
-                "Observaciones": review.get("observaciones", ""),
-                "Supervisor": review["supervisor_name"],
-                "Fecha Revisión": review["fecha_revision"]
-            })
+        # Obtener datos completos de las tareas revisadas
+        if _cached_df is None or not _data_loaded:
+            # Si no hay datos del Excel, solo exportar lo que está en la BD
+            export_data = []
+            for review in reviews:
+                export_data.append({
+                    "Fecha Ejecución": "",
+                    "POC ID": "",
+                    "Detalle Tarea": "",
+                    "Imagen": "",
+                    "Promotor": "",
+                    "Status": review["status"],
+                    "Observaciones": review.get("observaciones", ""),
+                    "Supervisor": review["supervisor_name"],
+                    "Fecha Revisión": review["fecha_revision"]
+                })
+            df_export = pd.DataFrame(export_data)
+        else:
+            # Crear un diccionario para mapear task_id con datos del Excel
+            task_data = {}
+            for _, row in _cached_df.iterrows():
+                task_data[row["task_id"]] = {
+                    "fecha": row.get("Fecha", ""),
+                    "promotor": row.get("Promotor", ""),
+                    "poc_id": row.get("POC ID", ""),
+                    "detalle_tarea": row.get("Detalle Tarea", ""),
+                    "imagen": row.get("Imagen", "")
+                }
+            
+            # Construir datos para el Excel con TODOS los campos
+            export_data = []
+            for review in reviews:
+                task_id = review["task_id"]
+                task_info = task_data.get(task_id, {})
+                
+                export_data.append({
+                    "Fecha Ejecución": task_info.get("fecha", ""),
+                    "POC ID": task_info.get("poc_id", ""),
+                    "Detalle Tarea": task_info.get("detalle_tarea", ""),
+                    "Imagen": task_info.get("imagen", ""),
+                    "Promotor": task_info.get("promotor", ""),
+                    "Status": review["status"],
+                    "Observaciones": review.get("observaciones", ""),
+                    "Supervisor": review["supervisor_name"],
+                    "Fecha Revisión": review["fecha_revision"]
+                })
+            df_export = pd.DataFrame(export_data)
         
-        df_export = pd.DataFrame(export_data)
-        
+        # Crear archivo Excel en memoria
         output = io.BytesIO()
+        
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            df_export.to_excel(writer, sheet_name='Revisiones', index=False)
+            # Hoja 1: Detalle de revisiones con TODOS los campos
+            df_export.to_excel(writer, sheet_name='Revisiones Cierre', index=False)
             
-            if not df_export.empty and 'Status Asignado' in df_export.columns:
-                df_status = df_export.groupby('Status Asignado').size().reset_index(name='Cantidad')
+            # Hoja 2: Resumen por status
+            if not df_export.empty and 'Status' in df_export.columns:
+                df_status = df_export.groupby('Status').size().reset_index(name='Cantidad')
                 df_status = df_status.sort_values('Cantidad', ascending=False)
-                df_status.to_excel(writer, sheet_name='Resumen', index=False)
+                
+                # Agregar total
+                total_row = pd.DataFrame({
+                    'Status': ['TOTAL'],
+                    'Cantidad': [df_status['Cantidad'].sum()]
+                })
+                df_status = pd.concat([df_status, total_row], ignore_index=True)
+                df_status.to_excel(writer, sheet_name='Resumen por Status', index=False)
             
+            # Hoja 3: Resumen por promotor
+            if not df_export.empty and 'Promotor' in df_export.columns and 'Status' in df_export.columns:
+                df_promotor = df_export.groupby(['Promotor', 'Status']).size().unstack(fill_value=0)
+                df_promotor['Total'] = df_promotor.sum(axis=1)
+                df_promotor = df_promotor.sort_values('Total', ascending=False)
+                df_promotor.to_excel(writer, sheet_name='Resumen por Promotor')
+            
+            # Hoja 4: Información del cierre
             info_data = {
                 'Supervisor': [supervisor_name],
                 'ID Supervisor': [supervisor_id],
                 'Mes Cerrado': [mes],
                 'Fecha Cierre': [datetime.now().strftime('%Y-%m-%d %H:%M:%S')],
-                'Total Revisiones': [len(reviews)]
+                'Total Revisiones': [len(reviews)],
+                'Nota': ['Este archivo contiene el cierre completo del mes']
             }
             df_info = pd.DataFrame(info_data)
             df_info.to_excel(writer, sheet_name='Info Cierre', index=False)
+            
+            # Autoajustar columnas en todas las hojas
+            for sheet_name in writer.sheets:
+                worksheet = writer.sheets[sheet_name]
+                for column in worksheet.columns:
+                    max_length = 0
+                    column_letter = column[0].column_letter
+                    for cell in column:
+                        try:
+                            if len(str(cell.value)) > max_length:
+                                max_length = len(str(cell.value))
+                        except:
+                            pass
+                    adjusted_width = min(max_length + 2, 50)
+                    worksheet.column_dimensions[column_letter].width = adjusted_width
         
         output.seek(0)
+        
+        # Guardar una copia del archivo antes de limpiar
+        filename = f"cierre_mes_{supervisor_name}_{mes}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
         
         # Eliminar revisiones del mes actual
         db.clear_reviews(supervisor_id, mes)
@@ -540,8 +667,6 @@ def api_close_month():
         global _cached_df, _data_loaded
         _cached_df = None
         _data_loaded = False
-        
-        filename = f"cierre_mes_{supervisor_name}_{mes}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
         
         response = send_file(
             output,
