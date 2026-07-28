@@ -1,0 +1,1784 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sistema de Revisión de Fotos - Venier</title>
+    <style>
+        /* =============================================
+           COLORES CORPORATIVOS VENIER
+           ============================================= */
+        :root {
+            --azul-venier: #1B4F7B;
+            --azul-venier-claro: #5E85A1;
+            --azul-venier-oscuro: #123a5a;
+            --blanco: #FFFFFF;
+            --gris-claro: #f0f2f5;
+            --sombra: 0 4px 12px rgba(27, 79, 123, 0.15);
+            --radius: 12px;
+        }
+
+        /* =============================================
+           ESTILOS GENERALES
+           ============================================= */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            background: var(--gris-claro);
+            color: #1a1a1a;
+        }
+        
+        .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
+        
+        /* =============================================
+           HEADER CON LOGO VENIER
+           ============================================= */
+        .header {
+            background: linear-gradient(135deg, var(--azul-venier) 0%, var(--azul-venier-claro) 100%);
+            color: var(--blanco);
+            padding: 12px 25px;
+            border-radius: var(--radius);
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: var(--sombra);
+        }
+        
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        
+        .logo-container {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        
+        .logo-img {
+            height: 55px;
+            width: auto;
+            border-radius: 6px;
+            background: rgba(255,255,255,0.1);
+            padding: 4px 6px;
+        }
+        
+        .company-name {
+            font-size: 22px;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+            color: var(--blanco);
+        }
+        
+        .company-name span {
+            font-weight: 300;
+            opacity: 0.85;
+        }
+        
+        .header-title {
+            font-size: 16px;
+            font-weight: 400;
+            border-left: 2px solid rgba(255,255,255,0.3);
+            padding-left: 15px;
+            margin-left: 5px;
+            color: var(--blanco);
+        }
+        
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        
+        .btn-logout {
+            background: rgba(255,255,255,0.2);
+            color: var(--blanco);
+            border: 1px solid rgba(255,255,255,0.3);
+            padding: 8px 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.3s;
+        }
+        
+        .btn-logout:hover { 
+            background: rgba(255,255,255,0.3);
+            transform: scale(1.02);
+        }
+        
+        .user-badge {
+            background: rgba(255,255,255,0.15);
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: var(--blanco);
+        }
+        
+        /* =============================================
+           LOGIN (SIN CONTRASEÑA)
+           ============================================= */
+        .login-container {
+            background: var(--blanco);
+            max-width: 420px;
+            margin: 60px auto;
+            padding: 35px;
+            border-radius: var(--radius);
+            box-shadow: var(--sombra);
+            border-top: 5px solid var(--azul-venier);
+        }
+        
+        .login-container .logo-center {
+            text-align: center;
+            margin-bottom: 25px;
+        }
+        
+        .login-container .logo-center .logo-img {
+            height: 80px;
+            width: auto;
+        }
+        
+        .login-container .logo-center .company-name-login {
+            font-size: 24px;
+            font-weight: 700;
+            color: var(--azul-venier);
+            margin-top: 10px;
+        }
+        
+        .login-container .logo-center .company-name-login span {
+            font-weight: 300;
+            color: var(--azul-venier-claro);
+        }
+        
+        .login-container h2 {
+            color: var(--azul-venier);
+            margin-bottom: 20px;
+            text-align: center;
+            font-size: 20px;
+        }
+        
+        .login-container label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 600;
+            color: var(--azul-venier);
+        }
+        
+        .login-container select {
+            width: 100%;
+            padding: 12px 14px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 16px;
+            transition: border-color 0.3s;
+            background: white;
+        }
+        
+        .login-container select:focus {
+            outline: none;
+            border-color: var(--azul-venier);
+        }
+        
+        .login-container .btn-login {
+            width: 100%;
+            padding: 12px;
+            background: linear-gradient(135deg, var(--azul-venier) 0%, var(--azul-venier-claro) 100%);
+            color: var(--blanco);
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            margin-top: 10px;
+        }
+        
+        .login-container .btn-login:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 16px rgba(27, 79, 123, 0.35);
+        }
+        
+        .login-container .btn-login:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        /* =============================================
+           UPLOAD
+           ============================================= */
+        .upload-area {
+            background: var(--blanco);
+            padding: 30px;
+            border-radius: var(--radius);
+            margin-bottom: 20px;
+            border: 2px dashed var(--azul-venier-claro);
+            text-align: center;
+            transition: all 0.3s;
+            box-shadow: var(--sombra);
+        }
+        
+        .upload-area.dragover {
+            border-color: var(--azul-venier);
+            background: rgba(27, 79, 123, 0.05);
+        }
+        
+        .upload-area h3 {
+            color: var(--azul-venier);
+            margin-bottom: 10px;
+        }
+        
+        .upload-area .btn-upload {
+            padding: 10px 30px;
+            background: linear-gradient(135deg, var(--azul-venier) 0%, var(--azul-venier-claro) 100%);
+            color: var(--blanco);
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 14px;
+            transition: all 0.3s;
+        }
+        
+        .upload-area .btn-upload:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 16px rgba(27, 79, 123, 0.35);
+        }
+        
+        .upload-status {
+            margin-top: 10px;
+            font-weight: 600;
+        }
+        
+        .upload-status .success {
+            color: #2e7d32;
+        }
+        
+        .upload-status .error {
+            color: #c62828;
+        }
+        
+        .upload-status .info {
+            color: var(--azul-venier);
+        }
+        
+        /* =============================================
+           FILTROS
+           ============================================= */
+        .filters {
+            background: var(--blanco);
+            padding: 20px;
+            border-radius: var(--radius);
+            margin-bottom: 20px;
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+            align-items: end;
+            box-shadow: var(--sombra);
+        }
+        
+        .filter-group {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+        
+        .filter-group label {
+            font-size: 12px;
+            color: var(--azul-venier);
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .filter-group input,
+        .filter-group select {
+            padding: 8px 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+            min-width: 150px;
+        }
+        
+        .filter-group input:focus,
+        .filter-group select:focus {
+            outline: none;
+            border-color: var(--azul-venier);
+        }
+        
+        .filter-group input:disabled,
+        .filter-group select:disabled {
+            background: #f5f5f5;
+            cursor: not-allowed;
+            opacity: 0.6;
+        }
+        
+        .btn-filter {
+            padding: 8px 20px;
+            background: var(--azul-venier);
+            color: var(--blanco);
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.3s;
+        }
+        
+        .btn-filter:hover:not(:disabled) {
+            background: var(--azul-venier-oscuro);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(27, 79, 123, 0.3);
+        }
+        
+        .btn-filter:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .btn-reset {
+            padding: 8px 20px;
+            background: #9e9e9e;
+            color: var(--blanco);
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.3s;
+        }
+        
+        .btn-reset:hover:not(:disabled) {
+            background: #757575;
+            transform: translateY(-2px);
+        }
+        
+        .btn-reset:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .btn-export {
+            padding: 8px 20px;
+            background: var(--azul-venier);
+            color: var(--blanco);
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.3s;
+        }
+        
+        .btn-export:hover:not(:disabled) {
+            background: var(--azul-venier-oscuro);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(27, 79, 123, 0.3);
+        }
+        
+        .btn-export:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .btn-close-month {
+            padding: 8px 20px;
+            background: #c62828;
+            color: var(--blanco);
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.3s;
+        }
+        
+        .btn-close-month:hover:not(:disabled) {
+            background: #b71c1c;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(198, 40, 40, 0.3);
+        }
+        
+        .btn-close-month:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .actions-bar {
+            display: flex;
+            gap: 10px;
+            margin-left: auto;
+        }
+        
+        /* =============================================
+           STATS
+           ============================================= */
+        .stats-bar {
+            background: var(--blanco);
+            padding: 15px 20px;
+            border-radius: var(--radius);
+            margin-bottom: 20px;
+            display: flex;
+            gap: 30px;
+            flex-wrap: wrap;
+            box-shadow: var(--sombra);
+        }
+        
+        .stat-item {
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .stat-item .value {
+            font-size: 26px;
+            font-weight: 700;
+            color: var(--azul-venier);
+        }
+        
+        .stat-item .label {
+            font-size: 12px;
+            color: var(--azul-venier-claro);
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .stat-item .value.pending { 
+            color: #f57f17; 
+        }
+        
+        .stat-item .value.reviewed { 
+            color: #2e7d32; 
+        }
+        
+        .stat-item .value.objeccion { 
+            color: #1565c0; 
+        }
+        
+        .stat-item .value.invalida { 
+            color: #c62828; 
+        }
+        
+        .stat-item .value.fraude { 
+            color: #6d1b1b; 
+        }
+        
+        .stat-item .value.no-data {
+            color: #999;
+            font-size: 20px;
+        }
+        
+        /* =============================================
+           PHOTO GRID
+           ============================================= */
+        .photos-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 25px;
+        }
+        
+        .photo-card {
+            background: var(--blanco);
+            border-radius: var(--radius);
+            overflow: hidden;
+            box-shadow: var(--sombra);
+            transition: transform 0.3s, box-shadow 0.3s;
+        }
+        
+        .photo-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 24px rgba(27, 79, 123, 0.15);
+        }
+        
+        .photo-card .image-container {
+            width: 100%;
+            height: 350px;
+            background: #f5f5f5;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            cursor: pointer;
+            position: relative;
+        }
+        
+        .photo-card .image-container img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            transition: transform 0.3s ease;
+        }
+        
+        .photo-card .image-container img:hover {
+            transform: scale(1.05);
+        }
+        
+        .photo-card .image-container .no-image {
+            color: #999;
+            font-size: 14px;
+        }
+        
+        .photo-card .image-container .zoom-hint {
+            position: absolute;
+            bottom: 10px;
+            right: 10px;
+            background: rgba(27, 79, 123, 0.85);
+            color: var(--blanco);
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 11px;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+            pointer-events: none;
+        }
+        
+        .photo-card .image-container:hover .zoom-hint {
+            opacity: 1;
+        }
+        
+        .photo-card .info {
+            padding: 15px;
+        }
+        
+        .photo-card .info .task-id {
+            font-size: 11px;
+            color: var(--azul-venier-claro);
+            font-family: monospace;
+        }
+        
+        .photo-card .info .promotor {
+            font-weight: 700;
+            color: var(--azul-venier);
+            margin: 5px 0;
+            font-size: 17px;
+        }
+        
+        .photo-card .info .details {
+            font-size: 14px;
+            color: var(--azul-venier-claro);
+            margin-bottom: 10px;
+        }
+        
+        .photo-card .status-badge {
+            display: inline-block;
+            padding: 4px 14px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            margin-bottom: 10px;
+        }
+        
+        .status-badge.pending { 
+            background: #fff3e0; 
+            color: #e65100; 
+        }
+        
+        .status-badge.objeccion { 
+            background: #e3f2fd; 
+            color: #0d47a1; 
+        }
+        
+        .status-badge.invalida { 
+            background: #ffebee; 
+            color: #b71c1c; 
+        }
+        
+        .status-badge.fraude { 
+            background: #fce4ec; 
+            color: #880e4f; 
+        }
+        
+        .review-actions {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-top: 10px;
+        }
+        
+        .review-actions button {
+            padding: 8px 16px;
+            border: 2px solid transparent;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 600;
+            transition: all 0.3s;
+            flex: 1;
+            min-width: 80px;
+        }
+        
+        .review-actions button:hover {
+            transform: scale(1.03);
+        }
+        
+        .review-actions button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none !important;
+        }
+        
+        .btn-objeccion { 
+            background: #e3f2fd; 
+            color: #0d47a1; 
+        }
+        
+        .btn-invalida { 
+            background: #ffebee; 
+            color: #b71c1c; 
+        }
+        
+        .btn-fraude { 
+            background: #fce4ec; 
+            color: #880e4f; 
+        }
+        
+        .btn-objeccion.active { 
+            background: #0d47a1; 
+            color: var(--blanco); 
+            border-color: #0d47a1;
+        }
+        
+        .btn-invalida.active { 
+            background: #b71c1c; 
+            color: var(--blanco); 
+            border-color: #b71c1c;
+        }
+        
+        .btn-fraude.active { 
+            background: #880e4f; 
+            color: var(--blanco); 
+            border-color: #880e4f;
+        }
+        
+        .observaciones-input {
+            width: 100%;
+            padding: 10px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            margin-top: 10px;
+            resize: vertical;
+            font-family: inherit;
+            font-size: 14px;
+            min-height: 60px;
+            transition: border-color 0.3s;
+        }
+        
+        .observaciones-input:focus {
+            outline: none;
+            border-color: var(--azul-venier);
+        }
+        
+        .observaciones-input:disabled {
+            background: #f5f5f5;
+            cursor: not-allowed;
+        }
+        
+        .btn-save {
+            background: linear-gradient(135deg, var(--azul-venier) 0%, var(--azul-venier-claro) 100%);
+            color: var(--blanco);
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            margin-top: 10px;
+            width: 100%;
+            font-size: 15px;
+            transition: all 0.3s;
+        }
+        
+        .btn-save:hover:not(:disabled) { 
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(27, 79, 123, 0.35);
+        }
+        
+        .btn-save:disabled { 
+            background: #ccc; 
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+        
+        .btn-clean {
+            background: linear-gradient(135deg, #e53935 0%, #c62828 100%);
+            color: var(--blanco);
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            margin-top: 10px;
+            width: 100%;
+            font-size: 15px;
+            transition: all 0.3s;
+        }
+        
+        .btn-clean:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(198, 40, 40, 0.35);
+        }
+        
+        /* =============================================
+           MODAL DE ZOOM
+           ============================================= */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 9999;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.92);
+            cursor: zoom-out;
+            animation: fadeIn 0.3s ease;
+        }
+        
+        .modal.active {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        
+        .modal-content {
+            max-width: 92%;
+            max-height: 92%;
+            object-fit: contain;
+            cursor: zoom-out;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+            border-radius: 8px;
+        }
+        
+        .modal-close {
+            position: absolute;
+            top: 25px;
+            right: 35px;
+            color: var(--blanco);
+            font-size: 40px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: 0.3s;
+            background: none;
+            border: none;
+            z-index: 10000;
+        }
+        
+        .modal-close:hover {
+            color: #ccc;
+            transform: rotate(90deg);
+        }
+        
+        .modal-info {
+            position: absolute;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: rgba(255,255,255,0.85);
+            font-size: 14px;
+            background: rgba(27, 79, 123, 0.8);
+            padding: 10px 24px;
+            border-radius: 24px;
+            text-align: center;
+            max-width: 80%;
+            backdrop-filter: blur(4px);
+        }
+        
+        /* =============================================
+           TOAST
+           ============================================= */
+        .toast {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            padding: 15px 25px;
+            border-radius: 8px;
+            color: var(--blanco);
+            z-index: 1000;
+            animation: slideUp 0.3s ease;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+        }
+        
+        .toast.success { 
+            background: #2e7d32; 
+        }
+        
+        .toast.error { 
+            background: #c62828; 
+        }
+        
+        .toast.info { 
+            background: var(--azul-venier); 
+        }
+        
+        @keyframes slideUp {
+            from { transform: translateY(100px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+        
+        /* =============================================
+           LOADING Y EMPTY STATE
+           ============================================= */
+        .loading {
+            text-align: center;
+            padding: 50px;
+            color: var(--azul-venier-claro);
+            grid-column: 1 / -1;
+        }
+        
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: var(--azul-venier-claro);
+            grid-column: 1 / -1;
+            background: var(--blanco);
+            border-radius: var(--radius);
+            box-shadow: var(--sombra);
+        }
+        
+        .empty-state .icon {
+            font-size: 64px;
+            margin-bottom: 20px;
+        }
+        
+        .empty-state p {
+            font-size: 18px;
+            margin-bottom: 8px;
+        }
+        
+        .empty-state .sub {
+            font-size: 14px;
+            color: #999;
+        }
+        
+        .empty-state .hint {
+            font-size: 13px;
+            color: var(--azul-venier-claro);
+            margin-top: 15px;
+            padding: 12px 20px;
+            background: #f5f5f5;
+            border-radius: 8px;
+            display: inline-block;
+        }
+        
+        /* =============================================
+           RESPONSIVE
+           ============================================= */
+        @media (max-width: 1024px) {
+            .photos-grid {
+                grid-template-columns: repeat(2, 1fr);
+                gap: 20px;
+            }
+            
+            .photo-card .image-container {
+                height: 300px;
+            }
+            
+            .company-name {
+                font-size: 18px;
+            }
+            
+            .header-title {
+                font-size: 14px;
+                padding-left: 10px;
+            }
+        }
+        
+        @media (max-width: 768px) {
+            .photos-grid {
+                grid-template-columns: 1fr;
+                gap: 15px;
+            }
+            
+            .photo-card .image-container {
+                height: 250px;
+            }
+            
+            .filters {
+                flex-direction: column;
+                align-items: stretch;
+            }
+            
+            .actions-bar {
+                margin-left: 0;
+            }
+            
+            .stats-bar {
+                gap: 15px;
+            }
+            
+            .stat-item .value {
+                font-size: 20px;
+            }
+            
+            .header {
+                flex-direction: column;
+                gap: 10px;
+                padding: 15px;
+            }
+            
+            .header-left {
+                width: 100%;
+                justify-content: center;
+                flex-wrap: wrap;
+            }
+            
+            .header-title {
+                border-left: none;
+                padding-left: 0;
+                width: 100%;
+                text-align: center;
+            }
+            
+            .header-right {
+                width: 100%;
+                justify-content: center;
+            }
+            
+            .logo-container .company-name {
+                font-size: 16px;
+            }
+            
+            .logo-img {
+                height: 40px;
+            }
+        }
+        
+        @media (max-width: 480px) {
+            .photo-card .image-container {
+                height: 200px;
+            }
+            
+            .container {
+                padding: 10px;
+            }
+            
+            .login-container {
+                margin: 20px 10px;
+                padding: 20px;
+            }
+            
+            .stats-bar {
+                gap: 10px;
+            }
+            
+            .stat-item .value {
+                font-size: 18px;
+            }
+            
+            .modal-close {
+                top: 15px;
+                right: 20px;
+                font-size: 30px;
+            }
+            
+            .modal-info {
+                font-size: 12px;
+                padding: 6px 16px;
+                bottom: 15px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- =============================================
+             HEADER CON LOGO VENIER
+             ============================================= -->
+        <div class="header">
+            <div class="header-left">
+                <div class="logo-container">
+                    <img src="{{ url_for('static', filename='logo.png') }}" alt="Venier" class="logo-img">
+                    <div class="company-name">
+                        Venier <span>|</span>
+                    </div>
+                </div>
+                <div class="header-title">📸 Sistema de Revisión de Fotos</div>
+            </div>
+            <div class="header-right" id="userInfo" style="display: none;">
+                <span class="user-badge" id="userName">👤 Usuario</span>
+                <button class="btn-logout" onclick="logout()">Cerrar Sesión</button>
+            </div>
+        </div>
+        
+        <!-- =============================================
+             LOGIN (SIN CONTRASEÑA)
+             ============================================= -->
+        <div id="loginSection" class="login-container">
+            <div class="logo-center">
+                <img src="{{ url_for('static', filename='logo.png') }}" alt="Venier" class="logo-img">
+                <div class="company-name-login">
+                    Venier <span>| Sistema de Revisión</span>
+                </div>
+            </div>
+            <h2>👋 Selecciona tu usuario</h2>
+            <form id="loginForm">
+                <div style="margin-bottom: 20px;">
+                    <label>Supervisor</label>
+                    <select id="loginSupervisor">
+                        <option value="">Seleccionar...</option>
+                    </select>
+                </div>
+                <button type="submit" class="btn-login" id="btnLogin">
+                    Ingresar
+                </button>
+            </form>
+        </div>
+        
+        <!-- =============================================
+             CONTENIDO PRINCIPAL
+             ============================================= -->
+        <div id="mainContent" style="display: none;">
+            <!-- Upload -->
+            <div class="upload-area" id="uploadArea">
+                <h3>📤 Cargar Base de Datos</h3>
+                <p style="color: #666; margin: 10px 0;">Arrastra tu archivo Excel aquí o haz clic para seleccionar</p>
+                <input type="file" id="fileInput" accept=".xlsx" style="display: none;">
+                <button class="btn-upload" onclick="document.getElementById('fileInput').click()">
+                    Seleccionar Archivo
+                </button>
+                <div class="upload-status" id="uploadStatus">
+                    <span class="info">📌 Sube un archivo Excel para comenzar</span>
+                </div>
+            </div>
+            
+            <!-- Stats -->
+            <div class="stats-bar" id="statsBar">
+                <div class="stat-item">
+                    <span class="value reviewed" id="statTotal">0</span>
+                    <span class="label">Total Revisados</span>
+                </div>
+                <div class="stat-item">
+                    <span class="value pending" id="statPending">0</span>
+                    <span class="label">Pendientes</span>
+                </div>
+                <div class="stat-item">
+                    <span class="value objeccion" id="statObjeccion">0</span>
+                    <span class="label">Objeciones</span>
+                </div>
+                <div class="stat-item">
+                    <span class="value invalida" id="statInvalida">0</span>
+                    <span class="label">Inválidas</span>
+                </div>
+                <div class="stat-item">
+                    <span class="value fraude" id="statFraude">0</span>
+                    <span class="label">Fraudes</span>
+                </div>
+                <div class="stat-item">
+                    <span class="value" id="statPorcentaje" style="color: var(--azul-venier);">0%</span>
+                    <span class="label">Progreso</span>
+                </div>
+            </div>
+            
+            <!-- Filters -->
+            <div class="filters">
+                <div class="filter-group">
+                    <label>Fecha Desde</label>
+                    <input type="number" id="filterStartDate" placeholder="YYYYMMDD">
+                </div>
+                <div class="filter-group">
+                    <label>Fecha Hasta</label>
+                    <input type="number" id="filterEndDate" placeholder="YYYYMMDD">
+                </div>
+                <div class="filter-group">
+                    <label>Status</label>
+                    <select id="filterStatus">
+                        <option value="all">Todos</option>
+                        <option value="pending">Pendientes</option>
+                        <option value="objeccion">Objeción</option>
+                        <option value="invalida">Inválida</option>
+                        <option value="fraude">Fraude</option>
+                    </select>
+                </div>
+                <button class="btn-filter" id="btnFilter" onclick="loadTasks()">
+                    🔍 Filtrar
+                </button>
+                <button class="btn-reset" id="btnReset" onclick="resetFilters()">
+                    Resetear
+                </button>
+                
+                <div class="actions-bar">
+                    <button class="btn-export" id="btnExport" onclick="exportReviews()">
+                        📊 Exportar Reporte
+                    </button>
+                    <button class="btn-close-month" id="btnCloseMonth" onclick="closeMonth()">
+                        🔒 Cerrar Mes
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Photo Grid -->
+            <div id="photoGrid" class="photos-grid">
+                <div class="empty-state">
+                    <div class="icon">📂</div>
+                    <p>No hay datos para mostrar</p>
+                    <p class="sub">Sube un archivo Excel para comenzar a revisar fotos</p>
+                    <div class="hint">💡 Los archivos deben estar en formato .xlsx</div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- =============================================
+         MODAL DE ZOOM
+         ============================================= -->
+    <div id="imageModal" class="modal" onclick="closeModal()">
+        <button class="modal-close" onclick="closeModal()">✕</button>
+        <img id="modalImage" class="modal-content" src="" alt="Foto ampliada">
+        <div id="modalInfo" class="modal-info"></div>
+    </div>
+    
+    <!-- =============================================
+         JAVASCRIPT
+         ============================================= -->
+    <script>
+        let currentTasks = [];
+        let selectedStatus = {};
+        let savedStatus = {};
+        let currentSupervisor = null;
+        let hasDataLoaded = false;
+        
+        // =============================================
+        // LOGIN (SIN CONTRASEÑA)
+        // =============================================
+        
+        async function loadSupervisors() {
+            try {
+                const response = await fetch('/api/supervisors');
+                const supervisors = await response.json();
+                const select = document.getElementById('loginSupervisor');
+                select.innerHTML = '<option value="">Seleccionar...</option>';
+                supervisors.forEach(sup => {
+                    const option = document.createElement('option');
+                    option.value = sup.id;
+                    option.textContent = sup.name;
+                    select.appendChild(option);
+                });
+            } catch (error) {
+                showToast('Error al cargar supervisores', 'error');
+            }
+        }
+        
+        document.getElementById('loginForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const supervisorId = document.getElementById('loginSupervisor').value;
+            
+            if (!supervisorId) {
+                showToast('Selecciona un supervisor', 'error');
+                return;
+            }
+            
+            const btnLogin = document.getElementById('btnLogin');
+            btnLogin.disabled = true;
+            btnLogin.textContent = '⏳ Ingresando...';
+            
+            try {
+                const response = await fetch('/api/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ supervisor_id: parseInt(supervisorId) })
+                });
+                
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.error || 'Error al iniciar sesión');
+                }
+                
+                const data = await response.json();
+                currentSupervisor = data;
+                document.getElementById('loginSection').style.display = 'none';
+                document.getElementById('mainContent').style.display = 'block';
+                document.getElementById('userInfo').style.display = 'flex';
+                document.getElementById('userName').textContent = '👤 ' + data.supervisor_name;
+                
+                showToast('¡Bienvenido ' + data.supervisor_name + '!', 'success');
+                checkFileStatus();
+                
+            } catch (error) {
+                showToast(error.message, 'error');
+            } finally {
+                btnLogin.disabled = false;
+                btnLogin.textContent = 'Ingresar';
+            }
+        });
+        
+        async function logout() {
+            await fetch('/api/logout', { method: 'POST' });
+            location.reload();
+        }
+        
+        // =============================================
+        // FILE UPLOAD
+        // =============================================
+        
+        const uploadArea = document.getElementById('uploadArea');
+        const fileInput = document.getElementById('fileInput');
+        
+        uploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadArea.classList.add('dragover');
+        });
+        
+        uploadArea.addEventListener('dragleave', () => {
+            uploadArea.classList.remove('dragover');
+        });
+        
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadArea.classList.remove('dragover');
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                handleFile(files[0]);
+            }
+        });
+        
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                handleFile(e.target.files[0]);
+            }
+        });
+        
+        async function handleFile(file) {
+            if (!file.name.endsWith('.xlsx')) {
+                showToast('Solo se permiten archivos .xlsx', 'error');
+                return;
+            }
+            
+            const formData = new FormData();
+            formData.append('file', file);
+            
+            try {
+                const statusEl = document.getElementById('uploadStatus');
+                statusEl.innerHTML = '<span class="info">⏳ Subiendo archivo...</span>';
+                
+                const response = await fetch('/api/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.error || 'Error al subir archivo');
+                }
+                
+                const data = await response.json();
+                statusEl.innerHTML = '<span class="success">✅ ' + data.message + '</span>';
+                showToast('Archivo cargado correctamente', 'success');
+                
+                hasDataLoaded = true;
+                enableControls(true);
+                loadTasks();
+                loadStats();
+                
+            } catch (error) {
+                document.getElementById('uploadStatus').innerHTML = '<span class="error">❌ Error: ' + error.message + '</span>';
+                showToast(error.message, 'error');
+                hasDataLoaded = false;
+                enableControls(false);
+            }
+        }
+        
+        async function checkFileStatus() {
+            try {
+                const response = await fetch('/api/has_file');
+                const data = await response.json();
+                
+                if (data.has_file && data.data_loaded) {
+                    hasDataLoaded = true;
+                    document.getElementById('uploadStatus').innerHTML = '<span class="success">✅ Archivo cargado - Mes: ' + data.mes_actual + '</span>';
+                    enableControls(true);
+                    loadTasks();
+                    loadStats();
+                } else if (data.file_exists && !data.data_loaded) {
+                    document.getElementById('uploadStatus').innerHTML = '<span class="error">⚠️ El archivo existe pero no se pudo cargar. Vuelve a subirlo.</span>';
+                    enableControls(false);
+                } else {
+                    document.getElementById('uploadStatus').innerHTML = '<span class="info">📌 Sube un archivo Excel para comenzar</span>';
+                    enableControls(false);
+                    showEmptyState('📂', 'No hay datos para mostrar', 'Sube un archivo Excel para comenzar a revisar fotos');
+                }
+            } catch (error) {
+                console.error('Error checking file:', error);
+            }
+        }
+        
+        function enableControls(enabled) {
+            document.getElementById('btnFilter').disabled = !enabled;
+            document.getElementById('btnReset').disabled = !enabled;
+            document.getElementById('btnExport').disabled = !enabled;
+            document.getElementById('btnCloseMonth').disabled = !enabled;
+            document.getElementById('filterStartDate').disabled = !enabled;
+            document.getElementById('filterEndDate').disabled = !enabled;
+            document.getElementById('filterStatus').disabled = !enabled;
+        }
+        
+        function showEmptyState(icon, title, subtitle) {
+            const grid = document.getElementById('photoGrid');
+            grid.innerHTML = `
+                <div class="empty-state">
+                    <div class="icon">${icon}</div>
+                    <p>${title}</p>
+                    <p class="sub">${subtitle}</p>
+                    ${!hasDataLoaded ? '<div class="hint">💡 Los archivos deben estar en formato .xlsx</div>' : ''}
+                </div>
+            `;
+        }
+        
+        // =============================================
+        // TASKS
+        // =============================================
+        
+        async function loadTasks() {
+            if (!hasDataLoaded) {
+                showEmptyState('📂', 'No hay datos para mostrar', 'Sube un archivo Excel para comenzar a revisar fotos');
+                return;
+            }
+            
+            const startDate = document.getElementById('filterStartDate').value;
+            const endDate = document.getElementById('filterEndDate').value;
+            const statusFilter = document.getElementById('filterStatus').value;
+            
+            let url = '/api/tasks?';
+            if (startDate) url += `&start_date=${startDate}`;
+            if (endDate) url += `&end_date=${endDate}`;
+            
+            try {
+                const grid = document.getElementById('photoGrid');
+                grid.innerHTML = '<div class="loading">⏳ Cargando tareas...</div>';
+                
+                const response = await fetch(url);
+                
+                if (!response.ok) {
+                    if (response.status === 401) {
+                        showToast('Sesión expirada', 'error');
+                        logout();
+                        return;
+                    }
+                    const error = await response.json();
+                    
+                    if (error.no_data || error.no_tasks) {
+                        showEmptyState('📭', error.error, 'Prueba ajustando los filtros o subiendo un nuevo archivo');
+                        return;
+                    }
+                    throw new Error(error.error || 'Error al cargar tareas');
+                }
+                
+                const tasks = await response.json();
+                currentTasks = tasks;
+                
+                let filteredTasks = tasks;
+                if (statusFilter !== 'all') {
+                    if (statusFilter === 'pending') {
+                        filteredTasks = tasks.filter(t => !t.revisado);
+                    } else {
+                        filteredTasks = tasks.filter(t => t.status === statusFilter);
+                    }
+                }
+                
+                if (filteredTasks.length === 0) {
+                    showEmptyState('🔍', 'No hay tareas con esos filtros', 'Prueba cambiando los filtros de búsqueda');
+                    return;
+                }
+                
+                renderTasks(filteredTasks);
+                
+            } catch (error) {
+                showToast(error.message, 'error');
+                showEmptyState('❌', 'Error al cargar tareas', error.message);
+            }
+        }
+        
+        function renderTasks(tasks) {
+            const grid = document.getElementById('photoGrid');
+            
+            grid.innerHTML = tasks.map(task => {
+                const statusClass = task.revisado ? task.status : 'pending';
+                const statusLabel = task.revisado ? 
+                    task.status.charAt(0).toUpperCase() + task.status.slice(1) : 
+                    'Pendiente';
+                
+                const isSaved = task.revisado === true;
+                
+                return `
+                    <div class="photo-card" data-task-id="${task.task_id}">
+                        <div class="image-container" onclick="openModal('${task.imagen || ''}', '${task.promotor || ''}', '${task.task_id || ''}')">
+                            ${task.imagen ? 
+                                `<img src="${task.imagen}" alt="Foto" onerror="this.parentElement.innerHTML='<div class=\\'no-image\\'>📷 Sin imagen</div>'">` :
+                                `<div class="no-image">📷 Sin imagen</div>`
+                            }
+                            ${task.imagen ? `<div class="zoom-hint">🔍 Click para ampliar</div>` : ''}
+                        </div>
+                        <div class="info">
+                            <div class="task-id">ID: ${task.task_id}</div>
+                            <div class="promotor">👤 ${task.promotor}</div>
+                            <div class="details">
+                                📅 ${task.fecha} | 📋 ${task.detalle_tarea || 'Sin detalle'}
+                            </div>
+                            <span class="status-badge ${statusClass}">
+                                ${statusLabel}
+                            </span>
+                            ${task.revisado ? `<div style="font-size: 12px; color: var(--azul-venier-claro);">Revisado: ${task.fecha_revision || ''}</div>` : ''}
+                            ${task.observaciones ? `<div style="font-size: 13px; color: #555; margin: 5px 0;">💬 ${task.observaciones}</div>` : ''}
+                            
+                            <div class="review-actions">
+                                <button class="btn-objeccion ${task.status === 'objeccion' ? 'active' : ''}" 
+                                        onclick="event.stopPropagation(); selectStatus('${task.task_id}', 'objeccion')"
+                                        ${isSaved ? 'disabled' : ''}>
+                                    ✅ Objeción
+                                </button>
+                                <button class="btn-invalida ${task.status === 'invalida' ? 'active' : ''}" 
+                                        onclick="event.stopPropagation(); selectStatus('${task.task_id}', 'invalida')"
+                                        ${isSaved ? 'disabled' : ''}>
+                                    ❌ Inválida
+                                </button>
+                                <button class="btn-fraude ${task.status === 'fraude' ? 'active' : ''}" 
+                                        onclick="event.stopPropagation(); selectStatus('${task.task_id}', 'fraude')"
+                                        ${isSaved ? 'disabled' : ''}>
+                                    🚫 Fraude
+                                </button>
+                            </div>
+                            
+                            <textarea class="observaciones-input" 
+                                      placeholder="Observaciones (opcional)"
+                                      id="obs_${task.task_id}"
+                                      onclick="event.stopPropagation();"
+                                      ${isSaved ? 'disabled' : ''}>${task.observaciones || ''}</textarea>
+                            
+                            ${isSaved ? `
+                                <button class="btn-clean" onclick="event.stopPropagation(); cleanReview('${task.task_id}')">
+                                    🧹 Limpiar Revisión
+                                </button>
+                            ` : `
+                                <button class="btn-save" onclick="event.stopPropagation(); saveReview('${task.task_id}')">
+                                    💾 Guardar Revisión
+                                </button>
+                            `}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+            
+            tasks.forEach(task => {
+                if (task.revisado) {
+                    savedStatus[task.task_id] = true;
+                }
+            });
+        }
+        
+        function selectStatus(taskId, status) {
+            if (savedStatus[taskId]) {
+                showToast('Esta revisión ya está guardada. Usa "Limpiar" para modificarla.', 'error');
+                return;
+            }
+            
+            const card = document.querySelector(`.photo-card[data-task-id="${taskId}"]`);
+            if (!card) return;
+            
+            const buttons = card.querySelectorAll('.review-actions button');
+            buttons.forEach(btn => btn.classList.remove('active'));
+            
+            const buttonMap = {
+                'objeccion': '.btn-objeccion',
+                'invalida': '.btn-invalida',
+                'fraude': '.btn-fraude'
+            };
+            
+            const selectedBtn = card.querySelector(buttonMap[status]);
+            if (selectedBtn) selectedBtn.classList.add('active');
+            
+            selectedStatus[taskId] = status;
+        }
+        
+        async function saveReview(taskId) {
+            const card = document.querySelector(`.photo-card[data-task-id="${taskId}"]`);
+            if (!card) return;
+            
+            if (savedStatus[taskId]) {
+                showToast('Esta revisión ya está guardada', 'error');
+                return;
+            }
+            
+            const status = selectedStatus[taskId];
+            if (!status) {
+                showToast('Selecciona un status antes de guardar', 'error');
+                return;
+            }
+            
+            const observaciones = document.getElementById(`obs_${taskId}`).value.trim();
+            
+            try {
+                const response = await fetch('/api/save_review', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        task_id: taskId,
+                        status: status,
+                        observaciones: observaciones
+                    })
+                });
+                
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.error || 'Error al guardar');
+                }
+                
+                savedStatus[taskId] = true;
+                
+                showToast('✅ Revisión guardada correctamente', 'success');
+                loadTasks();
+                loadStats();
+                
+            } catch (error) {
+                showToast('Error: ' + error.message, 'error');
+            }
+        }
+        
+        // =============================================
+        // LIMPIAR REVISIÓN
+        // =============================================
+        
+        async function cleanReview(taskId) {
+            if (!confirm('¿Estás seguro de que quieres limpiar esta revisión? Podrás seleccionar un nuevo status.')) {
+                return;
+            }
+            
+            try {
+                const response = await fetch(`/api/delete_review/${taskId}`, {
+                    method: 'DELETE'
+                });
+                
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.error || 'Error al limpiar la revisión');
+                }
+                
+                delete savedStatus[taskId];
+                delete selectedStatus[taskId];
+                
+                showToast('🧹 Revisión limpiada. Puedes seleccionar un nuevo status.', 'success');
+                loadTasks();
+                loadStats();
+                
+            } catch (error) {
+                showToast('Error: ' + error.message, 'error');
+            }
+        }
+        
+        // =============================================
+        // ZOOM DE IMAGEN (MODAL)
+        // =============================================
+        
+        function openModal(imageUrl, promotor, taskId) {
+            if (!imageUrl) {
+                showToast('No hay imagen para ampliar', 'error');
+                return;
+            }
+            
+            const modal = document.getElementById('imageModal');
+            const modalImg = document.getElementById('modalImage');
+            const modalInfo = document.getElementById('modalInfo');
+            
+            modalImg.src = imageUrl;
+            modalInfo.textContent = `👤 ${promotor || 'Sin promotor'} | ID: ${taskId || 'Sin ID'}`;
+            modal.classList.add('active');
+            
+            document.body.style.overflow = 'hidden';
+        }
+        
+        function closeModal() {
+            const modal = document.getElementById('imageModal');
+            modal.classList.remove('active');
+            document.body.style.overflow = 'auto';
+            
+            setTimeout(() => {
+                document.getElementById('modalImage').src = '';
+            }, 300);
+        }
+        
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                closeModal();
+            }
+        });
+        
+        // =============================================
+        // EXPORTAR REVISIONES
+        // =============================================
+        
+        async function exportReviews() {
+            try {
+                showToast('⏳ Generando reporte...', 'info');
+                
+                const response = await fetch('/api/export_reviews');
+                
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.error || 'Error al exportar');
+                }
+                
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                
+                const contentDisposition = response.headers.get('Content-Disposition');
+                let filename = 'revisiones.xlsx';
+                if (contentDisposition) {
+                    const match = contentDisposition.match(/filename=([^;]+)/);
+                    if (match) filename = match[1].replace(/["']/g, '');
+                }
+                
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                window.URL.revokeObjectURL(url);
+                
+                showToast('✅ Reporte descargado exitosamente', 'success');
+                
+            } catch (error) {
+                showToast('Error: ' + error.message, 'error');
+            }
+        }
+        
+        // =============================================
+        // CIERRE DE MES
+        // =============================================
+        
+        async function closeMonth() {
+            const confirmMsg = '⚠️ ESTA ACCIÓN ES DEFINITIVA\n\n' +
+                               'Se exportarán TODAS tus revisiones y se LIMPIARÁ la base de datos.\n\n' +
+                               '¿Estás seguro de que quieres cerrar el mes?';
+            
+            if (!confirm(confirmMsg)) {
+                return;
+            }
+            
+            const confirm2 = confirm('Última confirmación: ¿Ya descargaste el reporte de respaldo?');
+            if (!confirm2) {
+                showToast('Cierre cancelado. Descarga el reporte primero.', 'error');
+                return;
+            }
+            
+            try {
+                const btnClose = document.getElementById('btnCloseMonth');
+                btnClose.disabled = true;
+                btnClose.textContent = '⏳ Cerrando...';
+                
+                showToast('⏳ Generando cierre de mes...', 'info');
+                
+                const response = await fetch('/api/close_month', {
+                    method: 'POST'
+                });
+                
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.error || 'Error en el cierre');
+                }
+                
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                
+                const contentDisposition = response.headers.get('Content-Disposition');
+                let filename = 'cierre_mes.xlsx';
+                if (contentDisposition) {
+                    const match = contentDisposition.match(/filename=([^;]+)/);
+                    if (match) filename = match[1].replace(/["']/g, '');
+                }
+                
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                window.URL.revokeObjectURL(url);
+                
+                showToast('✅ Cierre de mes completado. Base de datos limpiada.', 'success');
+                
+                hasDataLoaded = false;
+                enableControls(false);
+                
+                setTimeout(() => {
+                    location.reload();
+                }, 1500);
+                
+            } catch (error) {
+                showToast('Error: ' + error.message, 'error');
+            } finally {
+                const btnClose = document.getElementById('btnCloseMonth');
+                btnClose.disabled = false;
+                btnClose.textContent = '🔒 Cerrar Mes';
+            }
+        }
+        
+        // =============================================
+        // STATS
+        // =============================================
+        
+        async function loadStats() {
+            try {
+                const response = await fetch('/api/stats');
+                if (!response.ok) return;
+                
+                const stats = await response.json();
+                
+                document.getElementById('statTotal').textContent = stats.total_revisados || 0;
+                document.getElementById('statPending').textContent = stats.total_pendientes || 0;
+                document.getElementById('statObjeccion').textContent = stats.by_status?.objeccion || 0;
+                document.getElementById('statInvalida').textContent = stats.by_status?.invalida || 0;
+                document.getElementById('statFraude').textContent = stats.by_status?.fraude || 0;
+                
+                if (stats.no_data) {
+                    document.getElementById('statPorcentaje').textContent = '0%';
+                    document.getElementById('statPorcentaje').style.color = '#999';
+                } else {
+                    document.getElementById('statPorcentaje').textContent = stats.porcentaje + '%';
+                    document.getElementById('statPorcentaje').style.color = 'var(--azul-venier)';
+                }
+                
+            } catch (error) {
+                console.error('Error loading stats:', error);
+            }
+        }
+        
+        // =============================================
+        // UTILITIES
+        // =============================================
+        
+        function resetFilters() {
+            document.getElementById('filterStartDate').value = '';
+            document.getElementById('filterEndDate').value = '';
+            document.getElementById('filterStatus').value = 'all';
+            loadTasks();
+        }
+        
+        function showToast(message, type = 'success') {
+            const existing = document.querySelector('.toast');
+            if (existing) existing.remove();
+            
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            toast.textContent = message;
+            document.body.appendChild(toast);
+            
+            setTimeout(() => {
+                toast.remove();
+            }, 3000);
+        }
+        
+        // =============================================
+        // INIT
+        // =============================================
+        
+        loadSupervisors();
+        setInterval(loadStats, 30000);
+    </script>
+</body>
+</html>
