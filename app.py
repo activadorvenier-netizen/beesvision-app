@@ -1,4 +1,4 @@
-# app.py
+# app.py - VERSIÓN CORREGIDA
 from __future__ import annotations
 from pathlib import Path
 from typing import Any
@@ -60,16 +60,19 @@ def _is_visita_valida(value: Any) -> bool:
         return False
     if isinstance(value, (int, float)):
         return float(value) == 1.0
+    if isinstance(value, bool):
+        return value
     text = str(value).strip().upper()
-    return text in {"VERDADERO", "TRUE", "1", "1.0"}
+    return text in {"VERDADERO", "TRUE", "1", "1.0", "SI", "YES"}
 
 def _build_task_id(row: pd.Series) -> str:
     """Crear ID único para cada tarea"""
-    parts = [
-        clean_text(row.get("Imagen", "")),
-        clean_text(row.get("POC ID", "")),
-        str(row.get("Fecha", ""))
-    ]
+    # Usar la columna Img (ahora se llama "Img" en la nueva bajada)
+    img_value = clean_text(row.get("Img", row.get("Imagen", "")))
+    poc_id = clean_text(row.get("POC ID", ""))
+    fecha = str(row.get("Fecha", ""))
+    
+    parts = [img_value, poc_id, fecha]
     raw = "|".join(parts)
     return hashlib.md5(raw.encode()).hexdigest()[:12]
 
@@ -78,26 +81,40 @@ def get_mes_actual():
     return datetime.now().strftime("%Y%m")
 
 # =====================================================
-# LOAD DATA
+# LOAD DATA - CORREGIDO
 # =====================================================
 
 def _load_data(path: Path) -> pd.DataFrame:
-    """Cargar y filtrar datos del Excel"""
+    """Cargar y filtrar datos del Excel (corregido para la nueva bajada)"""
     global _current_excel, _data_loaded, _current_mes
     
+    # Leer el archivo Excel
     df = pd.read_excel(path, engine="openpyxl")
     _current_excel = path.name
     _current_mes = get_mes_actual()
     
+    # Mapeo de nombres de columnas (nuevos vs antiguos)
+    # La nueva bajada usa "Img" en lugar de "Imagen"
+    column_mapping = {
+        "Imagen": "Img",  # Si existe "Imagen", mapear a "Img"
+    }
+    
+    # Verificar qué columnas existen y renombrar si es necesario
+    for old_name, new_name in column_mapping.items():
+        if old_name in df.columns and new_name not in df.columns:
+            df = df.rename(columns={old_name: new_name})
+    
+    # Columnas requeridas para la app
     required = [
         "Fecha", "Promotor", "POC ID", "Detalle Tarea", 
-        "Imagen", "Completada", "Validada", "Visita Valida", 
+        "Img",  # Ahora es "Img" en lugar de "Imagen"
+        "Completada", "Validada", "Visita Valida", 
         "Supervisor ID"
     ]
     
     missing = [c for c in required if c not in df.columns]
     if missing:
-        raise ValueError(f"Columnas faltantes: {missing}")
+        raise ValueError(f"Columnas faltantes en el archivo: {missing}")
     
     df = df.copy()
     
@@ -108,7 +125,7 @@ def _load_data(path: Path) -> pd.DataFrame:
     df["Supervisor ID"] = pd.to_numeric(df["Supervisor ID"], errors="coerce").astype("Int64")
     df["VisitaValidaBool"] = df["Visita Valida"].apply(_is_visita_valida)
     
-    # Filtrar
+    # Filtrar tareas: completadas, no validadas, visita válida, supervisor existente
     filtered = df[
         (df["Completada"] == 1.0) &
         (df["Validada"] == 0.0) &
@@ -265,6 +282,9 @@ def api_tasks():
         if is_reviewed:
             review = db.get_review_status(task_id, supervisor_id)
         
+        # Usar "Img" como nombre de columna (nueva bajada)
+        img_column = "Img" if "Img" in row else "Imagen"
+        
         response_rows.append({
             "row_id": int(row["row_id"]),
             "task_id": task_id,
@@ -272,7 +292,7 @@ def api_tasks():
             "promotor": clean_text(row.get("Promotor")),
             "poc_id": clean_text(row.get("POC ID")),
             "detalle_tarea": clean_text(row.get("Detalle Tarea")),
-            "imagen": clean_text(row.get("Imagen")),
+            "imagen": clean_text(row.get(img_column, "")),
             "revisado": is_reviewed,
             "status": review.get("status") if review else None,
             "observaciones": review.get("observaciones") if review else "",
@@ -391,7 +411,6 @@ def api_supervisors():
     items = [{"id": sid, "name": name} for sid, name in SUPERVISORS.items()]
     return jsonify(items)
 
-# app.py - Reemplazar las funciones de exportación
 
 # =====================================================
 # EXPORTAR REVISIONES (REPORTE SEMANAL)
@@ -433,13 +452,15 @@ def api_export_reviews():
         else:
             # Crear un diccionario para mapear task_id con datos del Excel
             task_data = {}
+            img_column = "Img" if "Img" in _cached_df.columns else "Imagen"
+            
             for _, row in _cached_df.iterrows():
                 task_data[row["task_id"]] = {
                     "fecha": row.get("Fecha", ""),
                     "promotor": row.get("Promotor", ""),
                     "poc_id": row.get("POC ID", ""),
                     "detalle_tarea": row.get("Detalle Tarea", ""),
-                    "imagen": row.get("Imagen", "")
+                    "imagen": row.get(img_column, "")
                 }
             
             # Construir datos para el Excel con TODOS los campos
@@ -531,14 +552,13 @@ def api_export_reviews():
 
 
 # =====================================================
-# CIERRE DE MES (CON TODOS LOS CAMPOS) - CORREGIDO
+# CIERRE DE MES
 # =====================================================
 
 @app.route("/api/close_month", methods=["POST"])
 @login_required
 def api_close_month():
     """Exportar todas las revisiones con todos los campos y limpiar la base de datos"""
-    # ✅ CORRECCIÓN: 'global' declarado al inicio de la función
     global _cached_df, _data_loaded
     
     try:
@@ -553,7 +573,6 @@ def api_close_month():
         
         # Obtener datos completos de las tareas revisadas
         if _cached_df is None or not _data_loaded:
-            # Si no hay datos del Excel, solo exportar lo que está en la BD
             export_data = []
             for review in reviews:
                 export_data.append({
@@ -571,13 +590,15 @@ def api_close_month():
         else:
             # Crear un diccionario para mapear task_id con datos del Excel
             task_data = {}
+            img_column = "Img" if "Img" in _cached_df.columns else "Imagen"
+            
             for _, row in _cached_df.iterrows():
                 task_data[row["task_id"]] = {
                     "fecha": row.get("Fecha", ""),
                     "promotor": row.get("Promotor", ""),
                     "poc_id": row.get("POC ID", ""),
                     "detalle_tarea": row.get("Detalle Tarea", ""),
-                    "imagen": row.get("Imagen", "")
+                    "imagen": row.get(img_column, "")
                 }
             
             # Construir datos para el Excel con TODOS los campos
@@ -603,15 +624,11 @@ def api_close_month():
         output = io.BytesIO()
         
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            # Hoja 1: Detalle de revisiones con TODOS los campos
             df_export.to_excel(writer, sheet_name='Revisiones Cierre', index=False)
             
-            # Hoja 2: Resumen por status
             if not df_export.empty and 'Status' in df_export.columns:
                 df_status = df_export.groupby('Status').size().reset_index(name='Cantidad')
                 df_status = df_status.sort_values('Cantidad', ascending=False)
-                
-                # Agregar total
                 total_row = pd.DataFrame({
                     'Status': ['TOTAL'],
                     'Cantidad': [df_status['Cantidad'].sum()]
@@ -619,14 +636,12 @@ def api_close_month():
                 df_status = pd.concat([df_status, total_row], ignore_index=True)
                 df_status.to_excel(writer, sheet_name='Resumen por Status', index=False)
             
-            # Hoja 3: Resumen por promotor
             if not df_export.empty and 'Promotor' in df_export.columns and 'Status' in df_export.columns:
                 df_promotor = df_export.groupby(['Promotor', 'Status']).size().unstack(fill_value=0)
                 df_promotor['Total'] = df_promotor.sum(axis=1)
                 df_promotor = df_promotor.sort_values('Total', ascending=False)
                 df_promotor.to_excel(writer, sheet_name='Resumen por Promotor')
             
-            # Hoja 4: Información del cierre
             info_data = {
                 'Supervisor': [supervisor_name],
                 'ID Supervisor': [supervisor_id],
@@ -638,7 +653,6 @@ def api_close_month():
             df_info = pd.DataFrame(info_data)
             df_info.to_excel(writer, sheet_name='Info Cierre', index=False)
             
-            # Autoajustar columnas en todas las hojas
             for sheet_name in writer.sheets:
                 worksheet = writer.sheets[sheet_name]
                 for column in worksheet.columns:
@@ -655,7 +669,6 @@ def api_close_month():
         
         output.seek(0)
         
-        # Guardar una copia del archivo antes de limpiar
         filename = f"cierre_mes_{supervisor_name}_{mes}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
         
         # Eliminar revisiones del mes actual
@@ -666,7 +679,6 @@ def api_close_month():
         if file_path.exists():
             file_path.unlink()
         
-        # Resetear cache (ya declarado al inicio)
         _cached_df = None
         _data_loaded = False
         
@@ -682,6 +694,7 @@ def api_close_month():
     except Exception as e:
         print(f"Error en cierre de mes: {e}")
         return jsonify({"error": str(e)}), 500
+
 
 # =====================================================
 # START
