@@ -1405,9 +1405,18 @@
                 
                 const isSaved = task.revisado === true;
                 
+                // Formatear fecha
+                let fechaFormateada = task.fecha || 'Sin fecha';
+                if (task.fecha && task.fecha.length === 8) {
+                    const año = task.fecha.substring(0, 4);
+                    const mes = task.fecha.substring(4, 6);
+                    const dia = task.fecha.substring(6, 8);
+                    fechaFormateada = `${dia}/${mes}/${año}`;
+                }
+                
                 return `
                     <div class="photo-card" data-task-id="${task.task_id}">
-                        <div class="image-container" onclick="openModal('${task.imagen || ''}', '${task.promotor || ''}', '${task.task_id || ''}')">
+                        <div class="image-container" onclick="openModal('${task.imagen || ''}', '${task.promotor || ''}', '${task.poc_id || ''}', '${task.task_id || ''}')">
                             ${task.imagen ? 
                                 `<img src="${task.imagen}" alt="Foto" onerror="this.parentElement.innerHTML='<div class=\\'no-image\\'>📷 Sin imagen</div>'">` :
                                 `<div class="no-image">📷 Sin imagen</div>`
@@ -1415,10 +1424,14 @@
                             ${task.imagen ? `<div class="zoom-hint">🔍 Click para ampliar</div>` : ''}
                         </div>
                         <div class="info">
-                            <div class="task-id">ID: ${task.task_id}</div>
-                            <div class="promotor">👤 ${task.promotor}</div>
+                            <!-- ELIMINADO: ID ya no se muestra -->
+                            <div class="promotor">👤 ${task.promotor || 'Sin promotor'}</div>
                             <div class="details">
-                                📅 ${task.fecha} | 📋 ${task.detalle_tarea || 'Sin detalle'}
+                                📅 ${fechaFormateada} 
+                                ${task.poc_id ? `| 🏢 Cliente: ${task.poc_id}` : ''}
+                            </div>
+                            <div class="details" style="font-size: 13px; color: #555; margin-top: 4px;">
+                                📋 ${task.detalle_tarea || 'Sin detalle'}
                             </div>
                             <span class="status-badge ${statusClass}">
                                 ${statusLabel}
@@ -1445,10 +1458,10 @@
                             </div>
                             
                             <textarea class="observaciones-input" 
-                                      placeholder="Observaciones (opcional)"
-                                      id="obs_${task.task_id}"
-                                      onclick="event.stopPropagation();"
-                                      ${isSaved ? 'disabled' : ''}>${task.observaciones || ''}</textarea>
+                                    placeholder="Observaciones (opcional)"
+                                    id="obs_${task.task_id}"
+                                    onclick="event.stopPropagation();"
+                                    ${isSaved ? 'disabled' : ''}>${task.observaciones || ''}</textarea>
                             
                             ${isSaved ? `
                                 <button class="btn-clean" onclick="event.stopPropagation(); cleanReview('${task.task_id}')">
@@ -1574,7 +1587,7 @@
         // ZOOM DE IMAGEN (MODAL)
         // =============================================
         
-        function openModal(imageUrl, promotor, taskId) {
+        function openModal(imageUrl, promotor, pocId, taskId) {
             if (!imageUrl) {
                 showToast('No hay imagen para ampliar', 'error');
                 return;
@@ -1585,9 +1598,14 @@
             const modalInfo = document.getElementById('modalInfo');
             
             modalImg.src = imageUrl;
-            modalInfo.textContent = `👤 ${promotor || 'Sin promotor'} | ID: ${taskId || 'Sin ID'}`;
-            modal.classList.add('active');
             
+            // Mostrar toda la información en el modal
+            let infoText = `👤 ${promotor || 'Sin promotor'}`;
+            if (pocId) infoText += ` | 🏢 Cliente: ${pocId}`;
+            if (taskId) infoText += ` | ID: ${taskId}`;
+            modalInfo.textContent = infoText;
+            
+            modal.classList.add('active');
             document.body.style.overflow = 'hidden';
         }
         
