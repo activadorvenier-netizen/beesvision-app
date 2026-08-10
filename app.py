@@ -1,4 +1,4 @@
-# app.py - VERSIÓN COMPLETA FUNCIONANDO
+# app.py - VERSIÓN FINAL LIMPIA PARA PRODUCCIÓN
 from __future__ import annotations
 from pathlib import Path
 from typing import Any
@@ -9,10 +9,8 @@ import hashlib
 from datetime import datetime
 import io
 from models import ReviewDatabase
-import os
 import time
 import re
-import json
 
 # =====================================================
 # IMPORTS PARA GOOGLE SHEETS
@@ -32,10 +30,10 @@ UPLOAD_DIR.mkdir(exist_ok=True)
 # Base de datos
 db = ReviewDatabase()
 
-# Supervisores (SIN CONTRASEÑA)
+# Supervisores
 SUPERVISORS = {
     14: "Bruno Del Popolo",
-    17: "Franco Vivani", 
+    17: "Franco Vivani",
     41: "Claudio Raposo",
 }
 
@@ -53,7 +51,7 @@ _current_mes = None
 # =====================================================
 
 GOOGLE_SHEETS_CONFIG = {
-    "sheet_id": "TU_SHEET_ID_AQUI",
+    "sheet_id": "12D-Ru8GNm0EE0NFg4kpcygqcPdqKpor9U4NOA-1TQRs",
     "sheet_name": "Clientes",
     "credentials_file": "credentials.json"
 }
@@ -63,31 +61,14 @@ _client_cache_time = 0
 CACHE_TTL = 600
 
 # =====================================================
-# DATOS DE CLIENTES EN DURO (RESPALDO - FUNCIONA SIEMPRE)
+# CLIENTES LOCALES (RESPALDO)
 # =====================================================
 
 CLIENTES_LOCALES = {
-    "8232": {
-        "nombre": "CARDONI MAURICIO",
-        "direccion": "Av. Siempre Viva 742"
-    },
-    "5533": {
-        "nombre": "CLIENTE EJEMPLO 1",
-        "direccion": "Calle Falsa 123"
-    },
-    "1517": {
-        "nombre": "CLIENTE EJEMPLO 2",
-        "direccion": "Av. Principal 456"
-    },
-    "823": {
-        "nombre": "CLIENTE DE PRUEBA",
-        "direccion": "Calle Test 789"
-    },
-    "1875": {  # <--- AGREGAR ESTE
-        "nombre": "CARDONI MAURICIO",
-        "direccion": "Av. Siempre Viva 742, Córdoba"
+    "1875": {
+        "nombre": "GRAU ADRIAN",
+        "direccion": "CHABAS - ESPAÑA - 2151"
     }
-
 }
 
 # =====================================================
@@ -147,13 +128,7 @@ def load_client_master():
         return {}
 
 def extract_short_poc_id(poc_id):
-    """
-    Extraer el código de cliente del POC ID completo.
-    Ejemplos:
-    - 05382200008232 -> 8232
-    - 5382200008232 -> 8232
-    - 05382200005533 -> 5533
-    """
+    """Extraer el código de cliente del POC ID completo"""
     if not poc_id:
         return ""
     
@@ -196,18 +171,15 @@ def get_client_info(poc_id):
     if not short_id:
         return None
     
-    # PRIMERO: Buscar en clientes locales (respaldo)
-    if short_id in CLIENTES_LOCALES:
-        print(f"✅ Cliente LOCAL: {short_id} -> {CLIENTES_LOCALES[short_id]['nombre']}")
-        return CLIENTES_LOCALES[short_id]
-    
-    # SEGUNDO: Buscar en Google Sheets
+    # Buscar en Google Sheets primero
     master = load_client_master()
     if master and short_id in master:
-        print(f"✅ Cliente SHEETS: {short_id} -> {master[short_id]['nombre']}")
         return master.get(short_id)
     
-    print(f"⚠️ Cliente NO ENCONTRADO: {short_id}")
+    # Buscar en clientes locales (respaldo)
+    if short_id in CLIENTES_LOCALES:
+        return CLIENTES_LOCALES[short_id]
+    
     return None
 
 # =====================================================
@@ -291,6 +263,10 @@ def _load_data(path: Path) -> pd.DataFrame:
     df = pd.read_excel(path, engine="openpyxl")
     _current_excel = path.name
     _current_mes = get_mes_actual()
+    
+    # Renombrar TaskImageUrl a Img si existe
+    if "TaskImageUrl" in df.columns and "Img" not in df.columns:
+        df = df.rename(columns={"TaskImageUrl": "Img"})
     
     required = ["Fecha", "Promotor", "POC ID", "Detalle Tarea", "Img", "Completada", "Validada", "Visita Valida", "Supervisor ID"]
     
@@ -460,39 +436,8 @@ def api_tasks():
         raw_poc_id = clean_text(row.get("POC ID"))
         short_poc_id = extract_short_poc_id(raw_poc_id)
         
-        # ============================================================
-        # DATOS EN DURO PARA PRUEBA - ESTO VA A FUNCIONAR SEGURO
-        # ============================================================
-        # Mapeo directo de POC ID a datos del cliente
-        CLIENTES_PRUEBA = {
-            "1875": {
-                "nombre": "CARDONI MAURICIO",
-                "direccion": "Av. Siempre Viva 742, Córdoba"
-            },
-            "8232": {
-                "nombre": "CLIENTE EJEMPLO",
-                "direccion": "Calle Falsa 123, Buenos Aires"
-            },
-            "5533": {
-                "nombre": "OTRO CLIENTE",
-                "direccion": "Av. Principal 456, Rosario"
-            }
-        }
-        
-        # Buscar en los datos de prueba
-        client_info = CLIENTES_PRUEBA.get(short_poc_id)
-        
-        # Si no está en los datos de prueba, buscar en Sheets o locales
-        if not client_info:
-            # Buscar en locales
-            client_info = CLIENTES_LOCALES.get(short_poc_id)
-            
-            # Buscar en Sheets
-            if not client_info:
-                master = load_client_master()
-                if master and short_poc_id in master:
-                    client_info = master.get(short_poc_id)
-        # ============================================================
+        # Buscar información del cliente
+        client_info = get_client_info(raw_poc_id)
         
         img_url = clean_text(row.get("Img", ""))
         if not img_url:
@@ -506,8 +451,8 @@ def api_tasks():
             "poc_id": short_poc_id,
             "poc_id_completo": raw_poc_id,
             "cliente_id": short_poc_id,
-            "razon_social": client_info.get("nombre") if client_info else "SIN RAZON SOCIAL",
-            "direccion": client_info.get("direccion") if client_info else "SIN LOCALIDAD",
+            "razon_social": client_info.get("nombre") if client_info else "SIN DATO",
+            "direccion": client_info.get("direccion") if client_info else "SIN DATO",
             "detalle_tarea": clean_text(row.get("Detalle Tarea")),
             "imagen": img_url,
             "revisado": is_reviewed,
@@ -620,30 +565,6 @@ def api_stats():
 def api_supervisors():
     items = [{"id": sid, "name": name} for sid, name in SUPERVISORS.items()]
     return jsonify(items)
-
-@app.route("/api/test_poc/<poc_id>")
-@login_required
-def test_poc(poc_id):
-    """Probar extracción de POC ID"""
-    short = extract_short_poc_id(poc_id)
-    return jsonify({
-        "original": poc_id,
-        "extraido": short
-    })
-
-@app.route("/api/test_sheets")
-@login_required
-def test_sheets():
-    """Probar conexión a Google Sheets"""
-    try:
-        master = load_client_master()
-        return jsonify({
-            "total_clientes": len(master),
-            "primeros_5": dict(list(master.items())[:5]),
-            "todos_los_ids": list(master.keys())[:10]
-        })
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
 
 @app.route("/api/export_reviews", methods=["GET"])
 @login_required
