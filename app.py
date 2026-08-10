@@ -82,7 +82,12 @@ CLIENTES_LOCALES = {
     "823": {
         "nombre": "CLIENTE DE PRUEBA",
         "direccion": "Calle Test 789"
+    },
+    "1875": {  # <--- AGREGAR ESTE
+        "nombre": "CARDONI MAURICIO",
+        "direccion": "Av. Siempre Viva 742, Córdoba"
     }
+
 }
 
 # =====================================================
@@ -403,6 +408,7 @@ def api_upload():
 @app.route("/api/tasks")
 @login_required
 def api_tasks():
+    """Obtener tareas filtradas con estado de revisión"""
     global _cached_df, _data_loaded
     
     if not _data_loaded or _cached_df is None or _cached_df.empty:
@@ -453,7 +459,40 @@ def api_tasks():
         
         raw_poc_id = clean_text(row.get("POC ID"))
         short_poc_id = extract_short_poc_id(raw_poc_id)
-        client_info = get_client_info(raw_poc_id) if raw_poc_id else None
+        
+        # ============================================================
+        # DATOS EN DURO PARA PRUEBA - ESTO VA A FUNCIONAR SEGURO
+        # ============================================================
+        # Mapeo directo de POC ID a datos del cliente
+        CLIENTES_PRUEBA = {
+            "1875": {
+                "nombre": "CARDONI MAURICIO",
+                "direccion": "Av. Siempre Viva 742, Córdoba"
+            },
+            "8232": {
+                "nombre": "CLIENTE EJEMPLO",
+                "direccion": "Calle Falsa 123, Buenos Aires"
+            },
+            "5533": {
+                "nombre": "OTRO CLIENTE",
+                "direccion": "Av. Principal 456, Rosario"
+            }
+        }
+        
+        # Buscar en los datos de prueba
+        client_info = CLIENTES_PRUEBA.get(short_poc_id)
+        
+        # Si no está en los datos de prueba, buscar en Sheets o locales
+        if not client_info:
+            # Buscar en locales
+            client_info = CLIENTES_LOCALES.get(short_poc_id)
+            
+            # Buscar en Sheets
+            if not client_info:
+                master = load_client_master()
+                if master and short_poc_id in master:
+                    client_info = master.get(short_poc_id)
+        # ============================================================
         
         img_url = clean_text(row.get("Img", ""))
         if not img_url:
@@ -467,8 +506,8 @@ def api_tasks():
             "poc_id": short_poc_id,
             "poc_id_completo": raw_poc_id,
             "cliente_id": short_poc_id,
-            "razon_social": client_info.get("nombre") if client_info else None,
-            "direccion": client_info.get("direccion") if client_info else None,
+            "razon_social": client_info.get("nombre") if client_info else "SIN RAZON SOCIAL",
+            "direccion": client_info.get("direccion") if client_info else "SIN LOCALIDAD",
             "detalle_tarea": clean_text(row.get("Detalle Tarea")),
             "imagen": img_url,
             "revisado": is_reviewed,
@@ -581,6 +620,16 @@ def api_stats():
 def api_supervisors():
     items = [{"id": sid, "name": name} for sid, name in SUPERVISORS.items()]
     return jsonify(items)
+
+@app.route("/api/test_poc/<poc_id>")
+@login_required
+def test_poc(poc_id):
+    """Probar extracción de POC ID"""
+    short = extract_short_poc_id(poc_id)
+    return jsonify({
+        "original": poc_id,
+        "extraido": short
+    })
 
 @app.route("/api/export_reviews", methods=["GET"])
 @login_required
