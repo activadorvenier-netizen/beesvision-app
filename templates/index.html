@@ -987,28 +987,40 @@
         /* =============================================
             CLIENTE INFO
             ============================================= */
-            .client-info {
-                background: #f0f4f8;
-                padding: 8px 10px;
-                border-radius: 6px;
-                border-left: 3px solid var(--azul-venier);
-                font-size: 13px;
-                color: #444;
-                margin-top: 4px;
-                line-height: 1.5;
-            }
+        .client-info {
+            background: #f0f4f8;
+            padding: 8px 10px;
+            border-radius: 6px;
+            border-left: 3px solid var(--azul-venier);
+            font-size: 13px;
+            color: #444;
+            margin-top: 4px;
+            line-height: 1.5;
+        }
 
-            .client-info .label {
-                font-weight: 600;
-                color: var(--azul-venier);
-            }
+        .client-info .label {
+            font-weight: 600;
+            color: var(--azul-venier);
+        }
 
-            .client-info .poc-id {
-                font-weight: 600;
-                color: var(--azul-venier);
-                font-family: monospace;
-                font-size: 14px;
-            }
+        .client-info .poc-id {
+            font-weight: 600;
+            color: var(--azul-venier);
+            font-family: monospace;
+            font-size: 14px;
+        }
+
+        .direccion-block {
+            margin-top: 6px;
+            padding-top: 6px;
+            border-top: 1px dashed #ddd;
+            font-size: 13px;
+            color: #555;
+        }
+
+        .direccion-block strong {
+            color: var(--azul-venier);
+        }
 
     </style>
 </head>
@@ -1432,16 +1444,7 @@
                 
                 const isSaved = task.revisado === true;
                 
-                // Formatear fecha
-                let fechaFormateada = task.fecha || 'Sin fecha';
-                if (task.fecha && task.fecha.length === 8) {
-                    const año = task.fecha.substring(0, 4);
-                    const mes = task.fecha.substring(4, 6);
-                    const dia = task.fecha.substring(6, 8);
-                    fechaFormateada = `${dia}/${mes}/${año}`;
-                }
-                
-                // === NUEVO: Construir información del cliente ===
+                // === CONSTRUIR INFORMACIÓN DEL CLIENTE ===
                 let clienteHtml = '';
                 
                 // POC ID (código corto)
@@ -1464,15 +1467,28 @@
                     clienteHtml += ` | 🏷️ ${task.subcanal}`;
                 }
                 
+                // Dirección (si existe)
+                let direccionHtml = '';
+                if (task.direccion) {
+                    direccionHtml = `
+                        <div class="direccion-block">
+                            <strong>📍 Dirección:</strong> ${task.direccion}
+                        </div>
+                    `;
+                }
+                
                 // Si no hay información del cliente
                 if (!clienteHtml) {
                     clienteHtml = '⚠️ Sin información de cliente';
                 }
                 // =============================================
                 
+                // Fecha ya viene formateada desde el backend, pero por si acaso
+                let fechaMostrada = task.fecha || 'Sin fecha';
+                
                 return `
                     <div class="photo-card" data-task-id="${task.task_id}">
-                        <div class="image-container" onclick="openModal('${task.imagen || ''}', '${task.promotor || ''}', '${task.poc_id || ''}', '${task.razon_social || ''}', '${task.localidad || ''}', '${task.subcanal || ''}')">
+                        <div class="image-container" onclick="openModal('${task.imagen || ''}', '${task.promotor || ''}', '${task.poc_id || ''}', '${task.razon_social || ''}', '${task.localidad || ''}', '${task.subcanal || ''}', '${task.direccion || ''}')">
                             ${task.imagen ? 
                                 `<img src="${task.imagen}" alt="Foto" onerror="this.parentElement.innerHTML='<div class=\\'no-image\\'>📷 Sin imagen</div>'">` :
                                 `<div class="no-image">📷 Sin imagen</div>`
@@ -1482,11 +1498,12 @@
                         <div class="info">
                             <div class="promotor">👤 ${task.promotor || 'Sin promotor'}</div>
                             <div class="details" style="font-weight: 500; color: var(--azul-venier);">
-                                📅 ${fechaFormateada}
+                                📅 ${fechaMostrada}
                             </div>
-                            <!-- === NUEVO: Bloque de información del cliente === -->
+                            <!-- Bloque de información del cliente -->
                             <div class="details" style="font-size: 13px; color: #444; margin-top: 4px; padding: 8px 10px; background: #f0f4f8; border-radius: 6px; border-left: 3px solid var(--azul-venier);">
                                 ${clienteHtml}
+                                ${direccionHtml}
                             </div>
                             <!-- ============================================= -->
                             <div class="details" style="font-size: 13px; color: #555; margin-top: 6px; padding: 6px 10px; background: #f5f7fa; border-radius: 6px;">
@@ -1646,7 +1663,7 @@
         // ZOOM DE IMAGEN (MODAL)
         // =============================================
         
-        function openModal(imageUrl, promotor, pocId, razonSocial, localidad, subcanal) {
+        function openModal(imageUrl, promotor, pocId, razonSocial, localidad, subcanal, direccion) {
             if (!imageUrl) {
                 showToast('No hay imagen para ampliar', 'error');
                 return;
@@ -1665,6 +1682,7 @@
             if (razonSocial) infoParts.push(`🏢 ${razonSocial}`);
             if (localidad) infoParts.push(`📍 ${localidad}`);
             if (subcanal) infoParts.push(`🏷️ ${subcanal}`);
+            if (direccion) infoParts.push(`📍 ${direccion}`);
             
             modalInfo.textContent = infoParts.join(' | ') || 'Sin información';
             
