@@ -201,6 +201,15 @@ def get_client_info(poc_id):
     if not short_id:
         return None
     
+    # === DATOS DE PRUEBA (comenta esto cuando funcione Sheets) ===
+    # Si el código es 8232, devolver datos de prueba
+    if short_id == "8232":
+        return {
+            "nombre": "CARDONI MAURICIO",
+            "direccion": "Av. Siempre Viva 742"
+        }
+    # ============================================================
+    
     # Buscar en el maestro de clientes
     master = load_client_master()
     return master.get(short_id)
