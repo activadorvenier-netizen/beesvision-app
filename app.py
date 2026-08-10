@@ -40,7 +40,7 @@ SUPERVISORS = {
 }
 
 app = Flask(__name__)
-app.secret_key = "clave_secreta_para_desarrollo"  # Cambiar en producción
+app.secret_key = "clave_secreta_para_desarrollo"
 
 # Cache de datos
 _cached_df = None
@@ -54,9 +54,9 @@ _current_mes = None
 
 # ⚠️ CAMBIA ESTOS VALORES CON LOS TUYOS ⚠️
 GOOGLE_SHEETS_CONFIG = {
-    "sheet_id": "TU_SHEET_ID_AQUI",      # El ID de tu Google Sheet (de la URL)
-    "sheet_name": "Clientes",             # Nombre de la hoja dentro del sheet
-    "credentials_file": "credentials.json" # Nombre del archivo de credenciales
+    "sheet_id": "TU_SHEET_ID_AQUI",      # El ID de tu Google Sheet
+    "sheet_name": "Clientes",             # Nombre de la hoja
+    "credentials_file": "credentials.json" # Archivo de credenciales
 }
 
 # Cache de clientes
@@ -85,7 +85,7 @@ def get_google_sheet_client():
 def load_client_master():
     """
     Cargar el maestro de clientes desde Google Sheets con caché.
-    El sheet debe tener columnas: POC_ID, RAZON_SOCIAL, LOCALIDAD, SUBCANAL
+    El sheet debe tener columnas: ClienteID, Nombre, Direccion
     """
     global _client_cache, _client_cache_time
     
@@ -109,15 +109,14 @@ def load_client_master():
         # Obtener todos los datos
         records = worksheet.get_all_records()
         
-        # Construir diccionario POC_ID -> datos
+        # Construir diccionario ClienteID -> datos
         client_master = {}
         for row in records:
-            poc_id = str(row.get("POC_ID", "")).strip()
-            if poc_id:
-                client_master[poc_id] = {
-                    "razon_social": row.get("RAZON_SOCIAL", ""),
-                    "localidad": row.get("LOCALIDAD", ""),
-                    "subcanal": row.get("SUBCANAL", "")
+            cliente_id = str(row.get("ClienteID", "")).strip()
+            if cliente_id:
+                client_master[cliente_id] = {
+                    "nombre": row.get("Nombre", ""),
+                    "direccion": row.get("Direccion", "")
                 }
         
         _client_cache = client_master
@@ -169,8 +168,6 @@ def extract_short_poc_id(poc_id):
         return poc_id
     
     # Si no coincide con el prefijo, intentar extraer los últimos caracteres
-    # (caso de respaldo por si el formato cambia)
-    # Buscamos el primer dígito distinto de cero después del prefijo
     match = re.search(r'0*(\d+)$', poc_id)
     if match:
         return match.group(1)
@@ -181,7 +178,7 @@ def extract_short_poc_id(poc_id):
 def get_client_info(poc_id):
     """
     Obtener información de un cliente por POC ID.
-    Primero extrae el código corto (últimos 4 dígitos)
+    Primero extrae el código corto, luego busca en el maestro.
     """
     if not poc_id:
         return None
@@ -252,6 +249,7 @@ def _load_data(path: Path) -> pd.DataFrame:
     _current_excel = path.name
     _current_mes = get_mes_actual()
     
+    # Mapeo de nombres de columnas
     column_mapping = {
         "Imagen": "Img",
     }
@@ -260,6 +258,7 @@ def _load_data(path: Path) -> pd.DataFrame:
         if old_name in df.columns and new_name not in df.columns:
             df = df.rename(columns={old_name: new_name})
     
+    # Columnas requeridas para la app
     required = [
         "Fecha", "Promotor", "POC ID", "Detalle Tarea", 
         "Img", "Completada", "Validada", "Visita Valida", 
@@ -272,12 +271,14 @@ def _load_data(path: Path) -> pd.DataFrame:
     
     df = df.copy()
     
+    # Limpiar datos
     df["Fecha"] = pd.to_numeric(df["Fecha"], errors="coerce").astype("Int64")
     df["Completada"] = pd.to_numeric(df["Completada"], errors="coerce")
     df["Validada"] = pd.to_numeric(df["Validada"], errors="coerce")
     df["Supervisor ID"] = pd.to_numeric(df["Supervisor ID"], errors="coerce").astype("Int64")
     df["VisitaValidaBool"] = df["Visita Valida"].apply(_is_visita_valida)
     
+    # Filtrar tareas
     filtered = df[
         (df["Completada"] == 1.0) &
         (df["Validada"] == 0.0) &
@@ -285,6 +286,7 @@ def _load_data(path: Path) -> pd.DataFrame:
         (df["Supervisor ID"].isin(SUPERVISORS.keys()))
     ].copy()
     
+    # IDs únicos
     filtered = filtered.reset_index(drop=True)
     filtered["row_id"] = range(1, len(filtered) + 1)
     filtered["task_id"] = filtered.apply(_build_task_id, axis=1)
@@ -396,6 +398,7 @@ def api_tasks():
     start_date = request.args.get("start_date", type=int)
     end_date = request.args.get("end_date", type=int)
     
+    # Filtrar por supervisor
     result = _cached_df[_cached_df["Supervisor ID"] == supervisor_id].copy()
     
     if result.empty:
@@ -404,6 +407,7 @@ def api_tasks():
             "no_tasks": True
         }), 404
     
+    # Filtrar por fechas
     if start_date is not None:
         result = result[result["Fecha"] >= start_date]
     if end_date is not None:
@@ -415,9 +419,11 @@ def api_tasks():
             "no_tasks": True
         }), 404
     
+    # Obtener estados de revisión
     task_ids = result["task_id"].tolist()
     pending_tasks = db.get_pending_tasks(supervisor_id, task_ids)
     
+    # Preparar respuesta
     response_rows = []
     for _, row in result.iterrows():
         task_id = row["task_id"]
@@ -432,7 +438,7 @@ def api_tasks():
         # Obtener POC ID original
         raw_poc_id = clean_text(row.get("POC ID"))
         
-        # Extraer el código corto (variable: 3, 4, 5 o 6 dígitos)
+        # Extraer el código corto
         short_poc_id = extract_short_poc_id(raw_poc_id)
         
         # Obtener información del cliente desde Google Sheets
@@ -443,11 +449,10 @@ def api_tasks():
             "task_id": task_id,
             "fecha": str(int(row["Fecha"])) if not pd.isna(row["Fecha"]) else "",
             "promotor": clean_text(row.get("Promotor")),
-            "poc_id": short_poc_id,  # Código corto (ej: 1517, 823, 12345)
-            "poc_id_completo": raw_poc_id,  # Código completo (ej: 05382200001517)
-            "razon_social": client_info.get("razon_social") if client_info else None,
-            "localidad": client_info.get("localidad") if client_info else None,
-            "subcanal": client_info.get("subcanal") if client_info else None,
+            "poc_id": short_poc_id,
+            "poc_id_completo": raw_poc_id,
+            "nombre": client_info.get("nombre") if client_info else None,
+            "direccion": client_info.get("direccion") if client_info else None,
             "detalle_tarea": clean_text(row.get("Detalle Tarea")),
             "imagen": clean_text(row.get(img_column, "")),
             "revisado": is_reviewed,
@@ -610,12 +615,15 @@ def api_export_reviews():
             for _, row in _cached_df.iterrows():
                 raw_poc_id = clean_text(row.get("POC ID", ""))
                 short_poc_id = extract_short_poc_id(raw_poc_id)
+                client_info = get_client_info(raw_poc_id) if raw_poc_id else None
                 
                 task_data[row["task_id"]] = {
                     "fecha": row.get("Fecha", ""),
                     "promotor": row.get("Promotor", ""),
                     "poc_id": short_poc_id,
                     "poc_id_completo": raw_poc_id,
+                    "nombre": client_info.get("nombre") if client_info else "",
+                    "direccion": client_info.get("direccion") if client_info else "",
                     "detalle_tarea": row.get("Detalle Tarea", ""),
                     "imagen": row.get(img_column, "")
                 }
@@ -629,6 +637,8 @@ def api_export_reviews():
                     "Fecha Ejecución": task_info.get("fecha", ""),
                     "POC ID": task_info.get("poc_id", ""),
                     "POC ID Completo": task_info.get("poc_id_completo", ""),
+                    "Nombre Cliente": task_info.get("nombre", ""),
+                    "Direccion": task_info.get("direccion", ""),
                     "Detalle Tarea": task_info.get("detalle_tarea", ""),
                     "Imagen": task_info.get("imagen", ""),
                     "Promotor": task_info.get("promotor", ""),
@@ -742,12 +752,15 @@ def api_close_month():
             for _, row in _cached_df.iterrows():
                 raw_poc_id = clean_text(row.get("POC ID", ""))
                 short_poc_id = extract_short_poc_id(raw_poc_id)
+                client_info = get_client_info(raw_poc_id) if raw_poc_id else None
                 
                 task_data[row["task_id"]] = {
                     "fecha": row.get("Fecha", ""),
                     "promotor": row.get("Promotor", ""),
                     "poc_id": short_poc_id,
                     "poc_id_completo": raw_poc_id,
+                    "nombre": client_info.get("nombre") if client_info else "",
+                    "direccion": client_info.get("direccion") if client_info else "",
                     "detalle_tarea": row.get("Detalle Tarea", ""),
                     "imagen": row.get(img_column, "")
                 }
@@ -761,6 +774,8 @@ def api_close_month():
                     "Fecha Ejecución": task_info.get("fecha", ""),
                     "POC ID": task_info.get("poc_id", ""),
                     "POC ID Completo": task_info.get("poc_id_completo", ""),
+                    "Nombre Cliente": task_info.get("nombre", ""),
+                    "Direccion": task_info.get("direccion", ""),
                     "Detalle Tarea": task_info.get("detalle_tarea", ""),
                     "Imagen": task_info.get("imagen", ""),
                     "Promotor": task_info.get("promotor", ""),
