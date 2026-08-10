@@ -1,4 +1,4 @@
-# app.py - VERSIÓN CORREGIDA CON GOOGLE SHEETS
+# app.py - VERSIÓN COMPLETA CORREGIDA CON GOOGLE SHEETS
 from __future__ import annotations
 from pathlib import Path
 from typing import Any
@@ -237,12 +237,34 @@ def get_mes_actual():
     """Obtener el mes actual en formato YYYYMM"""
     return datetime.now().strftime("%Y%m")
 
+def formatear_fecha(fecha_valor):
+    """
+    Formatear fecha de YYYYMMDD a DD/MM/YYYY
+    """
+    if pd.isna(fecha_valor):
+        return ""
+    
+    try:
+        fecha_int = int(fecha_valor)
+        fecha_str = str(fecha_int)
+        
+        # Si tiene 8 dígitos (YYYYMMDD), formatear
+        if len(fecha_str) == 8:
+            año = fecha_str[0:4]
+            mes = fecha_str[4:6]
+            dia = fecha_str[6:8]
+            return f"{dia}/{mes}/{año}"
+        else:
+            return fecha_str
+    except:
+        return str(fecha_valor)
+
 # =====================================================
 # LOAD DATA
 # =====================================================
 
 def _load_data(path: Path) -> pd.DataFrame:
-    """Cargar y filtrar datos del Excel (corregido para la nueva bajada)"""
+    """Cargar y filtrar datos del Excel (VERSIÓN CORREGIDA)"""
     global _current_excel, _data_loaded, _current_mes
     
     df = pd.read_excel(path, engine="openpyxl")
@@ -252,22 +274,50 @@ def _load_data(path: Path) -> pd.DataFrame:
     # Mapeo de nombres de columnas
     column_mapping = {
         "Imagen": "Img",
+        "Foto": "Img",
+        "Imagen URL": "Img",
+        "URL Imagen": "Img",
+        "Direccion": "Direccion",
+        "Dirección": "Direccion",
     }
     
     for old_name, new_name in column_mapping.items():
         if old_name in df.columns and new_name not in df.columns:
             df = df.rename(columns={old_name: new_name})
     
-    # Columnas requeridas para la app
-    required = [
-        "Fecha", "Promotor", "POC ID", "Detalle Tarea", 
-        "Img", "Completada", "Validada", "Visita Valida", 
-        "Supervisor ID"
-    ]
+    # Mapeo flexible de columnas requeridas
+    required_map = {
+        "Fecha": ["Fecha", "FECHA", "date", "Date"],
+        "Promotor": ["Promotor", "PROMOTOR", "promotor", "Promotor Nombre"],
+        "POC ID": ["POC ID", "poc_id", "PocId", "ClienteID"],
+        "Detalle Tarea": ["Detalle Tarea", "DETALLE TAREA", "detalle", "Detalle"],
+        "Img": ["Img", "IMAGEN", "Imagen", "Foto"],
+        "Completada": ["Completada", "COMPLETADA", "completada"],
+        "Validada": ["Validada", "VALIDADA", "validada"],
+        "Visita Valida": ["Visita Valida", "VISITA VALIDA", "visita_valida"],
+        "Supervisor ID": ["Supervisor ID", "SUPERVISOR ID", "supervisor_id", "Id Supervisor"],
+        "Direccion": ["Direccion", "Dirección", "direccion", "DIRECCION"]
+    }
     
-    missing = [c for c in required if c not in df.columns]
+    # Encontrar las columnas reales
+    actual_columns = {}
+    for key, possible_names in required_map.items():
+        for name in possible_names:
+            if name in df.columns:
+                actual_columns[key] = name
+                break
+    
+    # Verificar columnas encontradas
+    missing = [k for k in required_map.keys() if k not in actual_columns]
     if missing:
-        raise ValueError(f"Columnas faltantes en el archivo: {missing}")
+        print(f"⚠️ Columnas no encontradas: {missing}")
+        print(f"   Columnas disponibles: {df.columns.tolist()}")
+        raise ValueError(f"Columnas faltantes: {missing}")
+    
+    # Renombrar a los nombres estándar
+    for key, col_name in actual_columns.items():
+        if col_name != key:
+            df = df.rename(columns={col_name: key})
     
     df = df.copy()
     
@@ -278,13 +328,31 @@ def _load_data(path: Path) -> pd.DataFrame:
     df["Supervisor ID"] = pd.to_numeric(df["Supervisor ID"], errors="coerce").astype("Int64")
     df["VisitaValidaBool"] = df["Visita Valida"].apply(_is_visita_valida)
     
+    print(f"📊 Datos cargados - Total: {len(df)} filas")
+    print(f"📊 Supervisores encontrados: {df['Supervisor ID'].unique().tolist()}")
+    
     # Filtrar tareas
     filtered = df[
         (df["Completada"] == 1.0) &
         (df["Validada"] == 0.0) &
-        (df["VisitaValidaBool"]) &
-        (df["Supervisor ID"].isin(SUPERVISORS.keys()))
+        (df["VisitaValidaBool"])
     ].copy()
+    
+    print(f"📊 Después de filtros básicos: {len(filtered)} filas")
+    
+    # Si hay supervisor en sesión, filtrar por él
+    if 'supervisor_id' in session:
+        supervisor_id = session['supervisor_id']
+        filtered = filtered[filtered["Supervisor ID"] == supervisor_id]
+        print(f"📊 Filtrado por supervisor {supervisor_id}: {len(filtered)} filas")
+    
+    # Si no hay datos después del filtro, mostrar advertencia
+    if filtered.empty:
+        print("⚠️ No hay datos después del filtro. Verifica:")
+        print(f"   - Supervisor ID en sesión: {session.get('supervisor_id')}")
+        print(f"   - Supervisores disponibles en el archivo: {df['Supervisor ID'].unique().tolist()}")
+        print(f"   - Valores de Completada: {df['Completada'].unique().tolist()}")
+        print(f"   - Valores de Validada: {df['Validada'].unique().tolist()}")
     
     # IDs únicos
     filtered = filtered.reset_index(drop=True)
@@ -315,6 +383,16 @@ def api_login():
     
     session['supervisor_id'] = supervisor_id
     session['supervisor_name'] = SUPERVISORS[supervisor_id]
+    
+    # Forzar recarga de datos si existe archivo
+    global _cached_df, _data_loaded
+    file_path = UPLOAD_DIR / "data.xlsx"
+    if file_path.exists():
+        try:
+            _cached_df = _load_data(file_path)
+            _data_loaded = True
+        except Exception as e:
+            print(f"Error recargando datos: {e}")
     
     return jsonify({
         "ok": True,
@@ -389,10 +467,22 @@ def api_tasks():
     global _cached_df, _data_loaded
     
     if not _data_loaded or _cached_df is None or _cached_df.empty:
-        return jsonify({
-            "error": "No hay datos cargados. Por favor, sube un archivo Excel.",
-            "no_data": True
-        }), 404
+        # Intentar recargar desde archivo
+        file_path = UPLOAD_DIR / "data.xlsx"
+        if file_path.exists():
+            try:
+                _cached_df = _load_data(file_path)
+                _data_loaded = True
+            except Exception as e:
+                return jsonify({
+                    "error": f"Error cargando datos: {str(e)}",
+                    "no_data": True
+                }), 404
+        else:
+            return jsonify({
+                "error": "No hay datos cargados. Por favor, sube un archivo Excel.",
+                "no_data": True
+            }), 404
     
     supervisor_id = session['supervisor_id']
     start_date = request.args.get("start_date", type=int)
@@ -444,15 +534,20 @@ def api_tasks():
         # Obtener información del cliente desde Google Sheets
         client_info = get_client_info(raw_poc_id) if raw_poc_id else None
         
+        # Formatear fecha
+        fecha_formateada = formatear_fecha(row.get("Fecha"))
+        
         response_rows.append({
             "row_id": int(row["row_id"]),
             "task_id": task_id,
-            "fecha": str(int(row["Fecha"])) if not pd.isna(row["Fecha"]) else "",
+            "fecha": fecha_formateada,
             "promotor": clean_text(row.get("Promotor")),
             "poc_id": short_poc_id,
             "poc_id_completo": raw_poc_id,
-            "nombre": client_info.get("nombre") if client_info else None,
-            "direccion": client_info.get("direccion") if client_info else None,
+            "razon_social": client_info.get("nombre") if client_info else None,
+            "localidad": client_info.get("localidad") if client_info else None,
+            "subcanal": client_info.get("subcanal") if client_info else None,
+            "direccion": clean_text(row.get("Direccion")),
             "detalle_tarea": clean_text(row.get("Detalle Tarea")),
             "imagen": clean_text(row.get(img_column, "")),
             "revisado": is_reviewed,
@@ -601,6 +696,7 @@ def api_export_reviews():
                     "Detalle Tarea": "",
                     "Imagen": "",
                     "Promotor": "",
+                    "Direccion": "",
                     "Status": review["status"],
                     "Observaciones": review.get("observaciones", ""),
                     "Supervisor": review["supervisor_name"],
@@ -618,12 +714,12 @@ def api_export_reviews():
                 client_info = get_client_info(raw_poc_id) if raw_poc_id else None
                 
                 task_data[row["task_id"]] = {
-                    "fecha": row.get("Fecha", ""),
+                    "fecha": formatear_fecha(row.get("Fecha")),
                     "promotor": row.get("Promotor", ""),
                     "poc_id": short_poc_id,
                     "poc_id_completo": raw_poc_id,
-                    "nombre": client_info.get("nombre") if client_info else "",
-                    "direccion": client_info.get("direccion") if client_info else "",
+                    "razon_social": client_info.get("nombre") if client_info else "",
+                    "direccion": row.get("Direccion", ""),
                     "detalle_tarea": row.get("Detalle Tarea", ""),
                     "imagen": row.get(img_column, "")
                 }
@@ -637,7 +733,7 @@ def api_export_reviews():
                     "Fecha Ejecución": task_info.get("fecha", ""),
                     "POC ID": task_info.get("poc_id", ""),
                     "POC ID Completo": task_info.get("poc_id_completo", ""),
-                    "Nombre Cliente": task_info.get("nombre", ""),
+                    "Razón Social": task_info.get("razon_social", ""),
                     "Direccion": task_info.get("direccion", ""),
                     "Detalle Tarea": task_info.get("detalle_tarea", ""),
                     "Imagen": task_info.get("imagen", ""),
@@ -739,6 +835,7 @@ def api_close_month():
                     "Detalle Tarea": "",
                     "Imagen": "",
                     "Promotor": "",
+                    "Direccion": "",
                     "Status": review["status"],
                     "Observaciones": review.get("observaciones", ""),
                     "Supervisor": review["supervisor_name"],
@@ -755,12 +852,12 @@ def api_close_month():
                 client_info = get_client_info(raw_poc_id) if raw_poc_id else None
                 
                 task_data[row["task_id"]] = {
-                    "fecha": row.get("Fecha", ""),
+                    "fecha": formatear_fecha(row.get("Fecha")),
                     "promotor": row.get("Promotor", ""),
                     "poc_id": short_poc_id,
                     "poc_id_completo": raw_poc_id,
-                    "nombre": client_info.get("nombre") if client_info else "",
-                    "direccion": client_info.get("direccion") if client_info else "",
+                    "razon_social": client_info.get("nombre") if client_info else "",
+                    "direccion": row.get("Direccion", ""),
                     "detalle_tarea": row.get("Detalle Tarea", ""),
                     "imagen": row.get(img_column, "")
                 }
@@ -774,7 +871,7 @@ def api_close_month():
                     "Fecha Ejecución": task_info.get("fecha", ""),
                     "POC ID": task_info.get("poc_id", ""),
                     "POC ID Completo": task_info.get("poc_id_completo", ""),
-                    "Nombre Cliente": task_info.get("nombre", ""),
+                    "Razón Social": task_info.get("razon_social", ""),
                     "Direccion": task_info.get("direccion", ""),
                     "Detalle Tarea": task_info.get("detalle_tarea", ""),
                     "Imagen": task_info.get("imagen", ""),
