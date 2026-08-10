@@ -136,13 +136,14 @@ def load_client_master():
 def extract_short_poc_id(poc_id):
     """
     Extraer el código de cliente del POC ID completo.
-    El prefijo fijo es '0538220000' (10 dígitos).
-    También maneja POC IDs que comienzan con '53822' (sin el cero inicial).
+    El prefijo fijo es '0538220000' (10 dígitos) o '53822' (sin el cero inicial).
+    También elimina ceros a la izquierda del número final.
     Ejemplos:
-    - 05382200005533 -> 5533
-    - 5382200005533 -> 5533
     - 05382200008232 -> 8232
     - 5382200008232 -> 8232
+    - 05382200000008 -> 8
+    - 05382200208232 -> 208232
+    - 5382200208232 -> 208232
     """
     if not poc_id:
         return ""
@@ -161,24 +162,31 @@ def extract_short_poc_id(poc_id):
     PREFIX_FULL = "0538220000"  # 10 dígitos
     PREFIX_SHORT = "53822"      # 5 dígitos (sin el cero inicial)
     
+    resultado = poc_id
+    
     # Si el ID comienza con el prefijo completo (10 dígitos)
     if poc_id.startswith(PREFIX_FULL):
-        return poc_id[len(PREFIX_FULL):]
-    
+        resultado = poc_id[len(PREFIX_FULL):]
     # Si el ID comienza con el prefijo corto (5 dígitos)
-    if poc_id.startswith(PREFIX_SHORT):
-        return poc_id[len(PREFIX_SHORT):]
+    elif poc_id.startswith(PREFIX_SHORT):
+        resultado = poc_id[len(PREFIX_SHORT):]
+    # Si el ID es más corto que el prefijo, devolverlo tal cual
+    elif len(poc_id) < len(PREFIX_FULL):
+        resultado = poc_id
+    else:
+        # Si no coincide con ningún prefijo, intentar extraer los últimos números
+        match = re.search(r'0*(\d+)$', poc_id)
+        if match:
+            resultado = match.group(1)
     
-    # Si es más corto que el prefijo, devolverlo tal cual
-    if len(poc_id) < len(PREFIX_FULL):
-        return poc_id
+    # Eliminar ceros a la izquierda del resultado
+    resultado = str(resultado).lstrip('0')
     
-    # Si no coincide con ningún prefijo, intentar extraer los últimos números
-    match = re.search(r'0*(\d+)$', poc_id)
-    if match:
-        return match.group(1)
+    # Si quedó vacío, devolver "0"
+    if not resultado:
+        resultado = "0"
     
-    return poc_id
+    return resultado
 
 def get_client_info(poc_id):
     """
