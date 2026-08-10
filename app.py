@@ -1,4 +1,4 @@
-# app.py - VERSIÓN COMPLETA CORREGIDA CON GOOGLE SHEETS
+# app.py - VERSIÓN COMPLETA CORREGIDA
 from __future__ import annotations
 from pathlib import Path
 from typing import Any
@@ -138,41 +138,36 @@ def extract_short_poc_id(poc_id):
     Extraer el código de cliente del POC ID completo.
     El prefijo fijo es '0538220000' (10 dígitos).
     Ejemplos:
+    - 05382200005533 -> 5533
     - 05382200001517 -> 1517
     - 05382200000823 -> 823
-    - 05382200012345 -> 12345
-    - 053822000654321 -> 654321
     """
     if not poc_id:
         return ""
     
-    # Convertir a string si es necesario
+    # Convertir a string
     poc_id = str(poc_id).strip()
     
     # Si tiene .0 al final, removerlo
     if poc_id.endswith('.0'):
         poc_id = poc_id[:-2]
     
-    # Si tiene guiones o espacios, limpiar
-    poc_id = poc_id.replace('-', '').replace(' ', '')
-    
-    # Prefijo fijo que siempre está al inicio
+    # Prefijo fijo
     PREFIX = "0538220000"
     
     # Si el ID comienza con el prefijo, extraer lo que sigue
     if poc_id.startswith(PREFIX):
         return poc_id[len(PREFIX):]
     
-    # Si el ID es más corto que el prefijo, devolverlo tal cual
+    # Si es más corto, devolverlo tal cual
     if len(poc_id) < len(PREFIX):
         return poc_id
     
-    # Si no coincide con el prefijo, intentar extraer los últimos caracteres
+    # Si no coincide, intentar extraer los últimos números
     match = re.search(r'0*(\d+)$', poc_id)
     if match:
         return match.group(1)
     
-    # Último recurso: devolver todo
     return poc_id
 
 def get_client_info(poc_id):
@@ -225,7 +220,7 @@ def _is_visita_valida(value: Any) -> bool:
 
 def _build_task_id(row: pd.Series) -> str:
     """Crear ID único para cada tarea"""
-    img_value = clean_text(row.get("Img", row.get("Imagen", "")))
+    img_value = clean_text(row.get("Img", ""))
     poc_id = clean_text(row.get("POC ID", ""))
     fecha = str(row.get("Fecha", ""))
     
@@ -239,99 +234,74 @@ def get_mes_actual():
 
 def formatear_fecha(fecha_valor):
     """
-    Formatear fecha de YYYYMMDD a DD/MM/YYYY
+    Formatear fecha de DD/MM/YYYY a DD/MM/YYYY (mantener formato)
+    o de YYYYMMDD a DD/MM/YYYY
     """
     if pd.isna(fecha_valor):
         return ""
     
+    fecha_str = str(fecha_valor).strip()
+    
+    # Si ya tiene barras (DD/MM/YYYY), devolver igual
+    if '/' in fecha_str:
+        return fecha_str
+    
+    # Si es YYYYMMDD (ej: 20260810)
+    if len(fecha_str) == 8 and fecha_str.isdigit():
+        año = fecha_str[0:4]
+        mes = fecha_str[4:6]
+        dia = fecha_str[6:8]
+        return f"{dia}/{mes}/{año}"
+    
+    # Si es número de Excel
     try:
-        fecha_int = int(fecha_valor)
-        fecha_str = str(fecha_int)
-        
-        # Si tiene 8 dígitos (YYYYMMDD), formatear
-        if len(fecha_str) == 8:
-            año = fecha_str[0:4]
-            mes = fecha_str[4:6]
-            dia = fecha_str[6:8]
-            return f"{dia}/{mes}/{año}"
-        else:
-            return fecha_str
+        fecha_int = int(float(fecha_str))
+        if fecha_int > 40000:  # Número serial de Excel
+            fecha_obj = datetime(1899, 12, 30) + pd.Timedelta(days=fecha_int)
+            return fecha_obj.strftime("%d/%m/%Y")
     except:
-        return str(fecha_valor)
+        pass
+    
+    return fecha_str
 
 # =====================================================
 # LOAD DATA
 # =====================================================
 
 def _load_data(path: Path) -> pd.DataFrame:
-    """Cargar y filtrar datos del Excel (VERSIÓN CORREGIDA)"""
+    """Cargar y filtrar datos del Excel"""
     global _current_excel, _data_loaded, _current_mes
     
     df = pd.read_excel(path, engine="openpyxl")
     _current_excel = path.name
     _current_mes = get_mes_actual()
     
-    # Mapeo de nombres de columnas
-    column_mapping = {
-        "Imagen": "Img",
-        "Foto": "Img",
-        "Imagen URL": "Img",
-        "URL Imagen": "Img",
-        "Direccion": "Direccion",
-        "Dirección": "Direccion",
-    }
+    print(f"📊 Columnas encontradas: {df.columns.tolist()}")
+    print(f"📊 Total de filas: {len(df)}")
     
-    for old_name, new_name in column_mapping.items():
-        if old_name in df.columns and new_name not in df.columns:
-            df = df.rename(columns={old_name: new_name})
+    # Verificar columnas requeridas
+    required = [
+        "Fecha", "Promotor", "POC ID", "Detalle Tarea", 
+        "Img", "Completada", "Validada", "Visita Valida", 
+        "Supervisor ID"
+    ]
     
-    # Mapeo flexible de columnas requeridas
-    required_map = {
-        "Fecha": ["Fecha", "FECHA", "date", "Date"],
-        "Promotor": ["Promotor", "PROMOTOR", "promotor", "Promotor Nombre"],
-        "POC ID": ["POC ID", "poc_id", "PocId", "ClienteID"],
-        "Detalle Tarea": ["Detalle Tarea", "DETALLE TAREA", "detalle", "Detalle"],
-        "Img": ["Img", "IMAGEN", "Imagen", "Foto"],
-        "Completada": ["Completada", "COMPLETADA", "completada"],
-        "Validada": ["Validada", "VALIDADA", "validada"],
-        "Visita Valida": ["Visita Valida", "VISITA VALIDA", "visita_valida"],
-        "Supervisor ID": ["Supervisor ID", "SUPERVISOR ID", "supervisor_id", "Id Supervisor"],
-        "Direccion": ["Direccion", "Dirección", "direccion", "DIRECCION"]
-    }
-    
-    # Encontrar las columnas reales
-    actual_columns = {}
-    for key, possible_names in required_map.items():
-        for name in possible_names:
-            if name in df.columns:
-                actual_columns[key] = name
-                break
-    
-    # Verificar columnas encontradas
-    missing = [k for k in required_map.keys() if k not in actual_columns]
+    missing = [c for c in required if c not in df.columns]
     if missing:
-        print(f"⚠️ Columnas no encontradas: {missing}")
-        print(f"   Columnas disponibles: {df.columns.tolist()}")
-        raise ValueError(f"Columnas faltantes: {missing}")
-    
-    # Renombrar a los nombres estándar
-    for key, col_name in actual_columns.items():
-        if col_name != key:
-            df = df.rename(columns={col_name: key})
+        print(f"⚠️ Columnas faltantes: {missing}")
+        raise ValueError(f"Columnas faltantes en el archivo: {missing}")
     
     df = df.copy()
     
     # Limpiar datos
-    df["Fecha"] = pd.to_numeric(df["Fecha"], errors="coerce").astype("Int64")
     df["Completada"] = pd.to_numeric(df["Completada"], errors="coerce")
     df["Validada"] = pd.to_numeric(df["Validada"], errors="coerce")
     df["Supervisor ID"] = pd.to_numeric(df["Supervisor ID"], errors="coerce").astype("Int64")
     df["VisitaValidaBool"] = df["Visita Valida"].apply(_is_visita_valida)
     
-    print(f"📊 Datos cargados - Total: {len(df)} filas")
     print(f"📊 Supervisores encontrados: {df['Supervisor ID'].unique().tolist()}")
     
-    # Filtrar tareas
+    # Filtrar tareas: Completada=1, Validada=0, Visita Valida=VERDADERO
     filtered = df[
         (df["Completada"] == 1.0) &
         (df["Validada"] == 0.0) &
@@ -340,19 +310,15 @@ def _load_data(path: Path) -> pd.DataFrame:
     
     print(f"📊 Después de filtros básicos: {len(filtered)} filas")
     
-    # Si hay supervisor en sesión, filtrar por él
+    # Filtrar por supervisor en sesión
     if 'supervisor_id' in session:
         supervisor_id = session['supervisor_id']
         filtered = filtered[filtered["Supervisor ID"] == supervisor_id]
         print(f"📊 Filtrado por supervisor {supervisor_id}: {len(filtered)} filas")
     
-    # Si no hay datos después del filtro, mostrar advertencia
     if filtered.empty:
-        print("⚠️ No hay datos después del filtro. Verifica:")
+        print("⚠️ No hay datos después del filtro.")
         print(f"   - Supervisor ID en sesión: {session.get('supervisor_id')}")
-        print(f"   - Supervisores disponibles en el archivo: {df['Supervisor ID'].unique().tolist()}")
-        print(f"   - Valores de Completada: {df['Completada'].unique().tolist()}")
-        print(f"   - Valores de Validada: {df['Validada'].unique().tolist()}")
     
     # IDs únicos
     filtered = filtered.reset_index(drop=True)
@@ -467,7 +433,6 @@ def api_tasks():
     global _cached_df, _data_loaded
     
     if not _data_loaded or _cached_df is None or _cached_df.empty:
-        # Intentar recargar desde archivo
         file_path = UPLOAD_DIR / "data.xlsx"
         if file_path.exists():
             try:
@@ -485,8 +450,8 @@ def api_tasks():
             }), 404
     
     supervisor_id = session['supervisor_id']
-    start_date = request.args.get("start_date", type=int)
-    end_date = request.args.get("end_date", type=int)
+    start_date = request.args.get("start_date", type=str)
+    end_date = request.args.get("end_date", type=str)
     
     # Filtrar por supervisor
     result = _cached_df[_cached_df["Supervisor ID"] == supervisor_id].copy()
@@ -497,11 +462,18 @@ def api_tasks():
             "no_tasks": True
         }), 404
     
-    # Filtrar por fechas
-    if start_date is not None:
-        result = result[result["Fecha"] >= start_date]
-    if end_date is not None:
-        result = result[result["Fecha"] <= end_date]
+    # Filtrar por fechas (la fecha viene como string en el Excel)
+    if start_date:
+        try:
+            # Convertir DD/MM/YYYY a string para comparar
+            result = result[result["Fecha"].astype(str) >= start_date]
+        except:
+            pass
+    if end_date:
+        try:
+            result = result[result["Fecha"].astype(str) <= end_date]
+        except:
+            pass
     
     if result.empty:
         return jsonify({
@@ -523,8 +495,6 @@ def api_tasks():
         if is_reviewed:
             review = db.get_review_status(task_id, supervisor_id)
         
-        img_column = "Img" if "Img" in row else "Imagen"
-        
         # Obtener POC ID original
         raw_poc_id = clean_text(row.get("POC ID"))
         
@@ -534,8 +504,14 @@ def api_tasks():
         # Obtener información del cliente desde Google Sheets
         client_info = get_client_info(raw_poc_id) if raw_poc_id else None
         
-        # Formatear fecha
-        fecha_formateada = formatear_fecha(row.get("Fecha"))
+        # Obtener fecha (ya viene en formato DD/MM/YYYY del Excel)
+        fecha_raw = row.get("Fecha")
+        fecha_formateada = formatear_fecha(fecha_raw)
+        
+        # Obtener URL de imagen (usar Img o TaskImageUrl)
+        img_url = clean_text(row.get("Img", ""))
+        if not img_url:
+            img_url = clean_text(row.get("TaskImageUrl", ""))
         
         response_rows.append({
             "row_id": int(row["row_id"]),
@@ -545,11 +521,9 @@ def api_tasks():
             "poc_id": short_poc_id,
             "poc_id_completo": raw_poc_id,
             "razon_social": client_info.get("nombre") if client_info else None,
-            "localidad": client_info.get("localidad") if client_info else None,
-            "subcanal": client_info.get("subcanal") if client_info else None,
-            "direccion": clean_text(row.get("Direccion")),
+            "direccion": client_info.get("direccion") if client_info else None,
             "detalle_tarea": clean_text(row.get("Detalle Tarea")),
-            "imagen": clean_text(row.get(img_column, "")),
+            "imagen": img_url,
             "revisado": is_reviewed,
             "status": review.get("status") if review else None,
             "observaciones": review.get("observaciones") if review else "",
@@ -696,22 +670,24 @@ def api_export_reviews():
                     "Detalle Tarea": "",
                     "Imagen": "",
                     "Promotor": "",
+                    "Nombre Cliente": "",
                     "Direccion": "",
                     "Status": review["status"],
                     "Observaciones": review.get("observaciones", ""),
                     "Supervisor": review["supervisor_name"],
-                    "Fecha Revisión": review["fecha_revision"],
-                    "Nota": "Datos del Excel no disponibles"
+                    "Fecha Revisión": review["fecha_revision"]
                 })
             df_export = pd.DataFrame(export_data)
         else:
             task_data = {}
-            img_column = "Img" if "Img" in _cached_df.columns else "Imagen"
             
             for _, row in _cached_df.iterrows():
                 raw_poc_id = clean_text(row.get("POC ID", ""))
                 short_poc_id = extract_short_poc_id(raw_poc_id)
                 client_info = get_client_info(raw_poc_id) if raw_poc_id else None
+                img_url = clean_text(row.get("Img", ""))
+                if not img_url:
+                    img_url = clean_text(row.get("TaskImageUrl", ""))
                 
                 task_data[row["task_id"]] = {
                     "fecha": formatear_fecha(row.get("Fecha")),
@@ -719,9 +695,9 @@ def api_export_reviews():
                     "poc_id": short_poc_id,
                     "poc_id_completo": raw_poc_id,
                     "razon_social": client_info.get("nombre") if client_info else "",
-                    "direccion": row.get("Direccion", ""),
+                    "direccion": client_info.get("direccion") if client_info else "",
                     "detalle_tarea": row.get("Detalle Tarea", ""),
-                    "imagen": row.get(img_column, "")
+                    "imagen": img_url
                 }
             
             export_data = []
@@ -733,7 +709,7 @@ def api_export_reviews():
                     "Fecha Ejecución": task_info.get("fecha", ""),
                     "POC ID": task_info.get("poc_id", ""),
                     "POC ID Completo": task_info.get("poc_id_completo", ""),
-                    "Razón Social": task_info.get("razon_social", ""),
+                    "Nombre Cliente": task_info.get("razon_social", ""),
                     "Direccion": task_info.get("direccion", ""),
                     "Detalle Tarea": task_info.get("detalle_tarea", ""),
                     "Imagen": task_info.get("imagen", ""),
@@ -835,6 +811,7 @@ def api_close_month():
                     "Detalle Tarea": "",
                     "Imagen": "",
                     "Promotor": "",
+                    "Nombre Cliente": "",
                     "Direccion": "",
                     "Status": review["status"],
                     "Observaciones": review.get("observaciones", ""),
@@ -844,12 +821,14 @@ def api_close_month():
             df_export = pd.DataFrame(export_data)
         else:
             task_data = {}
-            img_column = "Img" if "Img" in _cached_df.columns else "Imagen"
             
             for _, row in _cached_df.iterrows():
                 raw_poc_id = clean_text(row.get("POC ID", ""))
                 short_poc_id = extract_short_poc_id(raw_poc_id)
                 client_info = get_client_info(raw_poc_id) if raw_poc_id else None
+                img_url = clean_text(row.get("Img", ""))
+                if not img_url:
+                    img_url = clean_text(row.get("TaskImageUrl", ""))
                 
                 task_data[row["task_id"]] = {
                     "fecha": formatear_fecha(row.get("Fecha")),
@@ -857,9 +836,9 @@ def api_close_month():
                     "poc_id": short_poc_id,
                     "poc_id_completo": raw_poc_id,
                     "razon_social": client_info.get("nombre") if client_info else "",
-                    "direccion": row.get("Direccion", ""),
+                    "direccion": client_info.get("direccion") if client_info else "",
                     "detalle_tarea": row.get("Detalle Tarea", ""),
-                    "imagen": row.get(img_column, "")
+                    "imagen": img_url
                 }
             
             export_data = []
@@ -871,7 +850,7 @@ def api_close_month():
                     "Fecha Ejecución": task_info.get("fecha", ""),
                     "POC ID": task_info.get("poc_id", ""),
                     "POC ID Completo": task_info.get("poc_id_completo", ""),
-                    "Razón Social": task_info.get("razon_social", ""),
+                    "Nombre Cliente": task_info.get("razon_social", ""),
                     "Direccion": task_info.get("direccion", ""),
                     "Detalle Tarea": task_info.get("detalle_tarea", ""),
                     "Imagen": task_info.get("imagen", ""),
@@ -954,24 +933,6 @@ def api_close_month():
     except Exception as e:
         print(f"Error en cierre de mes: {e}")
         return jsonify({"error": str(e)}), 500
-
-
-# =====================================================
-# ENDPOINT DE PRUEBA PARA VERIFICAR EXTRACCIÓN DE POC ID
-# =====================================================
-
-@app.route("/api/test_poc/<poc_id>")
-@login_required
-def test_poc(poc_id):
-    """Endpoint de prueba para verificar la extracción del POC ID"""
-    short_id = extract_short_poc_id(poc_id)
-    client_info = get_client_info(poc_id)
-    
-    return jsonify({
-        "poc_id_original": poc_id,
-        "poc_id_extraido": short_id,
-        "cliente": client_info
-    })
 
 
 # =====================================================
