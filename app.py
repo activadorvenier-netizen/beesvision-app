@@ -497,7 +497,6 @@ def api_tasks():
     # Filtrar por fechas
     if start_date:
         try:
-            # Convertir fecha a string para comparar
             result = result[result["Fecha"].astype(str) >= start_date]
         except:
             pass
@@ -517,6 +516,11 @@ def api_tasks():
     task_ids = result["task_id"].tolist()
     pending_tasks = db.get_pending_tasks(supervisor_id, task_ids)
     
+    # Cargar el maestro de clientes una sola vez
+    client_master = load_client_master()
+    print(f"📊 Clientes cargados: {len(client_master)}")
+    print(f"📊 Primeros 5 IDs: {list(client_master.keys())[:5]}")
+    
     # Preparar respuesta
     response_rows = []
     for _, row in result.iterrows():
@@ -533,13 +537,18 @@ def api_tasks():
         # Extraer el código corto
         short_poc_id = extract_short_poc_id(raw_poc_id)
         
-        # Obtener información del cliente desde Google Sheets
-        client_info = get_client_info(raw_poc_id) if raw_poc_id else None
+        # Buscar en el maestro de clientes (usando el código corto)
+        client_info = client_master.get(short_poc_id) if short_poc_id else None
+        
+        # === DEBUG ===
+        if short_poc_id:
+            print(f"🔍 Buscando cliente: {short_poc_id} -> Encontrado: {client_info is not None}")
+        # =============
         
         # Obtener fecha
         fecha_formateada = formatear_fecha(row.get("Fecha"))
         
-        # Obtener URL de imagen (usar Img o TaskImageUrl)
+        # Obtener URL de imagen
         img_url = clean_text(row.get("Img", ""))
         if not img_url:
             img_url = clean_text(row.get("TaskImageUrl", ""))
@@ -551,7 +560,7 @@ def api_tasks():
             "promotor": clean_text(row.get("Promotor")),
             "poc_id": short_poc_id,
             "poc_id_completo": raw_poc_id,
-            "cliente_id": short_poc_id,  # ClienteID desde Sheets
+            "cliente_id": short_poc_id,
             "razon_social": client_info.get("nombre") if client_info else None,
             "direccion": client_info.get("direccion") if client_info else None,
             "detalle_tarea": clean_text(row.get("Detalle Tarea")),
