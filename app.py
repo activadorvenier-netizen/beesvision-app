@@ -1,4 +1,4 @@
-# app.py - VERSIÓN FINAL LIMPIA PARA PRODUCCIÓN
+# app.py - VERSIÓN FINAL CORREGIDA
 from __future__ import annotations
 from pathlib import Path
 from typing import Any
@@ -68,6 +68,10 @@ CLIENTES_LOCALES = {
     "1875": {
         "nombre": "GRAU ADRIAN",
         "direccion": "CHABAS - ESPAÑA - 2151"
+    },
+    "502": {
+        "nombre": "CLIENTE 502",
+        "direccion": "DIRECCION 502"
     }
 }
 
@@ -128,7 +132,13 @@ def load_client_master():
         return {}
 
 def extract_short_poc_id(poc_id):
-    """Extraer el código de cliente del POC ID completo"""
+    """
+    Extraer el código de cliente del POC ID completo.
+    PREFIJO: 0538220000 (10 dígitos)
+    Ejemplo: 05382200001875 -> 1875
+             05382200000502 -> 502
+             05382200003300 -> 3300
+    """
     if not poc_id:
         return ""
     
@@ -139,58 +149,54 @@ def extract_short_poc_id(poc_id):
     
     poc_id = poc_id.replace('-', '').replace(' ', '')
     
-    # Prefijo fijo: 05382200000000
-    PREFIX = "05382200000000"
+    # Prefijo fijo de 10 dígitos
+    PREFIX = "0538220000"
     
+    # Si empieza con el prefijo, extraer lo que sigue
     if poc_id.startswith(PREFIX):
-        return poc_id[len(PREFIX):]
+        resultado = poc_id[len(PREFIX):]
+        # Eliminar ceros a la izquierda
+        resultado = resultado.lstrip('0')
+        return resultado if resultado else "0"
     
-    # Si no tiene prefijo, devolver el número limpiando ceros a la izquierda
-    return str(poc_id).lstrip('0') or "0"
+    # Si el POC ID empieza con 53822 (sin el 0 inicial)
+    if poc_id.startswith("53822"):
+        resultado = poc_id[5:]
+        resultado = resultado.lstrip('0')
+        return resultado if resultado else "0"
+    
+    # Si no tiene prefijo, devolver el número limpio
+    return poc_id.lstrip('0') or "0"
 
 def get_client_info(poc_id):
     """
     Obtener información de un cliente por POC ID.
-    Compara: 05382200000000 + ClienteID(Sheets) = POC ID(Excel)
+    1. Extrae el código corto del POC ID (ej: 05382200001875 -> 1875)
+    2. Busca ese código en Google Sheets
+    3. Si no encuentra, busca en CLIENTES_LOCALES
     """
     if not poc_id:
         return None
     
-    # Limpiar el POC ID
-    poc_id_clean = str(poc_id).strip()
-    if poc_id_clean.endswith('.0'):
-        poc_id_clean = poc_id_clean[:-2]
-    poc_id_clean = poc_id_clean.replace('-', '').replace(' ', '')
-    
-    # Cargar el maestro de clientes desde Sheets
-    master = load_client_master()
-    if not master:
-        # Si no hay Sheets, buscar en locales
-        short_id = extract_short_poc_id(poc_id)
-        if short_id in CLIENTES_LOCALES:
-            return CLIENTES_LOCALES[short_id]
+    # Extraer el código corto del cliente
+    short_id = extract_short_poc_id(poc_id)
+    if not short_id or short_id == "0":
         return None
     
-    # PREFIJO FIJO (12 dígitos: 053822000000)
-    PREFIX = "05382200000000"
+    print(f"🔍 Buscando cliente: {short_id} (POC ID: {poc_id})")
     
-    # Buscar el cliente en Sheets
-    for cliente_id, cliente_data in master.items():
-        # Construir el POC ID: prefijo + ClienteID
-        poc_id_completo = PREFIX + str(cliente_id)
-        
-        # Comparar con el POC ID del Excel
-        if poc_id_clean == poc_id_completo:
-            print(f"✅ Cliente encontrado: {cliente_id} -> {cliente_data['nombre']}")
-            return cliente_data
+    # BUSCAR EN GOOGLE SHEETS
+    master = load_client_master()
+    if master and short_id in master:
+        print(f"✅ Cliente encontrado en SHEETS: {short_id} -> {master[short_id]['nombre']}")
+        return master[short_id]
     
-    # Si no se encuentra en Sheets, buscar en locales
-    short_id = extract_short_poc_id(poc_id)
+    # BUSCAR EN CLIENTES LOCALES (RESPALDO)
     if short_id in CLIENTES_LOCALES:
-        print(f"✅ Cliente LOCAL: {short_id}")
+        print(f"✅ Cliente encontrado en LOCAL: {short_id} -> {CLIENTES_LOCALES[short_id]['nombre']}")
         return CLIENTES_LOCALES[short_id]
     
-    print(f"⚠️ Cliente NO ENCONTRADO: {poc_id_clean}")
+    print(f"⚠️ Cliente NO ENCONTRADO: {short_id}")
     return None
 
 # =====================================================
@@ -445,9 +451,11 @@ def api_tasks():
             review = db.get_review_status(task_id, supervisor_id)
         
         raw_poc_id = clean_text(row.get("POC ID"))
+        
+        # Extraer el código corto del cliente
         short_poc_id = extract_short_poc_id(raw_poc_id)
         
-        # Buscar información del cliente
+        # Buscar información del cliente usando el código corto
         client_info = get_client_info(raw_poc_id)
         
         img_url = clean_text(row.get("Img", ""))
@@ -576,6 +584,55 @@ def api_stats():
 def api_supervisors():
     items = [{"id": sid, "name": name} for sid, name in SUPERVISORS.items()]
     return jsonify(items)
+
+# =====================================================
+# ENDPOINTS DE PRUEBA (OPCIONALES)
+# =====================================================
+
+@app.route("/api/test_poc/<poc_id>")
+@login_required
+def test_poc(poc_id):
+    """Probar extracción de POC ID"""
+    short = extract_short_poc_id(poc_id)
+    return jsonify({
+        "original": poc_id,
+        "extraido": short
+    })
+
+@app.route("/api/test_sheets")
+@login_required
+def test_sheets():
+    """Probar conexión a Google Sheets"""
+    try:
+        master = load_client_master()
+        return jsonify({
+            "total_clientes": len(master),
+            "primeros_5": dict(list(master.items())[:5]),
+            "todos_los_ids": list(master.keys())[:10]
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/verificar_cliente/<poc_id>")
+@login_required
+def verificar_cliente(poc_id):
+    """Verificar si un cliente existe en Sheets"""
+    client_info = get_client_info(poc_id)
+    short_id = extract_short_poc_id(poc_id)
+    master = load_client_master()
+    
+    return jsonify({
+        "poc_id_recibido": poc_id,
+        "codigo_extraido": short_id,
+        "cliente_encontrado": client_info is not None,
+        "cliente": client_info,
+        "existe_en_sheets": short_id in master if master else False,
+        "primeros_ids_sheets": list(master.keys())[:10] if master else []
+    })
+
+# =====================================================
+# EXPORTAR Y CIERRE DE MES
+# =====================================================
 
 @app.route("/api/export_reviews", methods=["GET"])
 @login_required
