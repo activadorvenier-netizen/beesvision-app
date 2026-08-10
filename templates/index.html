@@ -1445,34 +1445,35 @@
                 const isSaved = task.revisado === true;
                 
                 // === INFORMACIÓN DEL CLIENTE ===
-                // Cliente ID (desde Sheets)
-                let clienteIdHtml = '';
-                if (task.cliente_id) {
-                    clienteIdHtml = `<strong>Cliente:</strong> ${task.cliente_id}`;
-                }
+                // Cliente ID - eliminamos ceros a la izquierda
+                let clienteId = task.cliente_id ? task.cliente_id.replace(/^0+/, '') : '';
                 
                 // Razón Social (desde Sheets)
-                let razonSocialHtml = '';
-                if (task.razon_social) {
-                    razonSocialHtml = `<strong>Razón Social:</strong> ${task.razon_social}`;
-                }
+                let razonSocial = task.razon_social || '';
                 
                 // Localidad/Dirección (desde Sheets)
-                let localidadHtml = '';
-                if (task.direccion) {
-                    localidadHtml = `<strong>Localidad:</strong> ${task.direccion}`;
-                }
+                let localidad = task.direccion || '';
                 
-                // Si no hay información del cliente
+                // Construir la línea del cliente con guiones
                 let clienteInfoHtml = '';
-                if (clienteIdHtml || razonSocialHtml || localidadHtml) {
+                if (clienteId || razonSocial || localidad) {
+                    let partes = [];
+                    
+                    if (clienteId) {
+                        partes.push(`<strong>Cliente:</strong> ${clienteId}`);
+                    }
+                    
+                    if (razonSocial) {
+                        partes.push(razonSocial);
+                    }
+                    
+                    if (localidad) {
+                        partes.push(localidad);
+                    }
+                    
                     clienteInfoHtml = `
-                        <div style="font-size: 13px; color: #444; margin-top: 4px; padding: 8px 10px; background: #f0f4f8; border-radius: 6px; border-left: 3px solid var(--azul-venier); line-height: 1.8;">
-                            ${clienteIdHtml}
-                            ${clienteIdHtml && razonSocialHtml ? '<br>' : ''}
-                            ${razonSocialHtml}
-                            ${(clienteIdHtml || razonSocialHtml) && localidadHtml ? '<br>' : ''}
-                            ${localidadHtml}
+                        <div style="font-size: 13px; color: #333; margin-top: 4px; padding: 8px 10px; background: #f0f4f8; border-radius: 6px; border-left: 3px solid var(--azul-venier); line-height: 1.8;">
+                            ${partes.join(' - ')}
                         </div>
                     `;
                 } else {
@@ -1489,7 +1490,7 @@
                 
                 return `
                     <div class="photo-card" data-task-id="${task.task_id}">
-                        <div class="image-container" onclick="openModal('${task.imagen || ''}', '${task.promotor || ''}', '${task.cliente_id || ''}', '${task.razon_social || ''}', '${task.direccion || ''}')">
+                        <div class="image-container" onclick="openModal('${task.imagen || ''}', '${task.promotor || ''}', '${task.cliente_id ? task.cliente_id.replace(/^0+/, '') : ''}', '${task.razon_social || ''}', '${task.direccion || ''}')">
                             ${task.imagen ? 
                                 `<img src="${task.imagen}" alt="Foto" onerror="this.parentElement.innerHTML='<div class=\\'no-image\\'>📷 Sin imagen</div>'">` :
                                 `<div class="no-image">📷 Sin imagen</div>`
