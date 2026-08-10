@@ -139,47 +139,58 @@ def extract_short_poc_id(poc_id):
     
     poc_id = poc_id.replace('-', '').replace(' ', '')
     
-    PREFIX_FULL = "0538220000"
-    PREFIX_SHORT = "53822"
+    # Prefijo fijo: 05382200000000
+    PREFIX = "05382200000000"
     
-    resultado = poc_id
+    if poc_id.startswith(PREFIX):
+        return poc_id[len(PREFIX):]
     
-    if poc_id.startswith(PREFIX_FULL):
-        resultado = poc_id[len(PREFIX_FULL):]
-    elif poc_id.startswith(PREFIX_SHORT):
-        resultado = poc_id[len(PREFIX_SHORT):]
-    elif len(poc_id) < len(PREFIX_FULL):
-        resultado = poc_id
-    else:
-        match = re.search(r'0*(\d+)$', poc_id)
-        if match:
-            resultado = match.group(1)
-    
-    resultado = str(resultado).lstrip('0')
-    
-    if not resultado:
-        resultado = "0"
-    
-    return resultado
+    # Si no tiene prefijo, devolver el número limpiando ceros a la izquierda
+    return str(poc_id).lstrip('0') or "0"
 
 def get_client_info(poc_id):
-    """Obtener información de un cliente por POC ID"""
+    """
+    Obtener información de un cliente por POC ID.
+    Compara: 05382200000000 + ClienteID(Sheets) = POC ID(Excel)
+    """
     if not poc_id:
         return None
     
-    short_id = extract_short_poc_id(poc_id)
-    if not short_id:
+    # Limpiar el POC ID
+    poc_id_clean = str(poc_id).strip()
+    if poc_id_clean.endswith('.0'):
+        poc_id_clean = poc_id_clean[:-2]
+    poc_id_clean = poc_id_clean.replace('-', '').replace(' ', '')
+    
+    # Cargar el maestro de clientes desde Sheets
+    master = load_client_master()
+    if not master:
+        # Si no hay Sheets, buscar en locales
+        short_id = extract_short_poc_id(poc_id)
+        if short_id in CLIENTES_LOCALES:
+            return CLIENTES_LOCALES[short_id]
         return None
     
-    # Buscar en Google Sheets primero
-    master = load_client_master()
-    if master and short_id in master:
-        return master.get(short_id)
+    # PREFIJO FIJO (12 dígitos: 053822000000)
+    PREFIX = "05382200000000"
     
-    # Buscar en clientes locales (respaldo)
+    # Buscar el cliente en Sheets
+    for cliente_id, cliente_data in master.items():
+        # Construir el POC ID: prefijo + ClienteID
+        poc_id_completo = PREFIX + str(cliente_id)
+        
+        # Comparar con el POC ID del Excel
+        if poc_id_clean == poc_id_completo:
+            print(f"✅ Cliente encontrado: {cliente_id} -> {cliente_data['nombre']}")
+            return cliente_data
+    
+    # Si no se encuentra en Sheets, buscar en locales
+    short_id = extract_short_poc_id(poc_id)
     if short_id in CLIENTES_LOCALES:
+        print(f"✅ Cliente LOCAL: {short_id}")
         return CLIENTES_LOCALES[short_id]
     
+    print(f"⚠️ Cliente NO ENCONTRADO: {poc_id_clean}")
     return None
 
 # =====================================================
