@@ -1,4 +1,4 @@
-# app.py - VERSIÓN CORREGIDA
+# app.py - VERSIÓN CORREGIDA CON GOOGLE SHEETS
 from __future__ import annotations
 from pathlib import Path
 from typing import Any
@@ -10,6 +10,20 @@ from datetime import datetime
 import io
 from models import ReviewDatabase
 import os
+import time
+import re
+
+# =====================================================
+# IMPORTS PARA GOOGLE SHEETS
+# =====================================================
+try:
+    import gspread
+    from oauth2client.service_account import ServiceAccountCredentials
+    GOOGLE_SHEETS_AVAILABLE = True
+except ImportError:
+    GOOGLE_SHEETS_AVAILABLE = False
+    print("⚠️ gspread no instalado. La funcionalidad de Google Sheets no estará disponible.")
+    print("   Instala con: pip install gspread oauth2client")
 
 BASE_DIR = Path(__file__).resolve().parent
 UPLOAD_DIR = BASE_DIR / "uploads"
@@ -33,6 +47,153 @@ _cached_df = None
 _current_excel = None
 _data_loaded = False
 _current_mes = None
+
+# =====================================================
+# CONFIGURACIÓN DE GOOGLE SHEETS
+# =====================================================
+
+# ⚠️ CAMBIA ESTOS VALORES CON LOS TUYOS ⚠️
+GOOGLE_SHEETS_CONFIG = {
+    "sheet_id": "TU_SHEET_ID_AQUI",      # El ID de tu Google Sheet (de la URL)
+    "sheet_name": "Clientes",             # Nombre de la hoja dentro del sheet
+    "credentials_file": "credentials.json" # Nombre del archivo de credenciales
+}
+
+# Cache de clientes
+_client_cache = {}
+_client_cache_time = 0
+CACHE_TTL = 600  # 10 minutos
+
+def get_google_sheet_client():
+    """Obtener conexión a Google Sheets"""
+    if not GOOGLE_SHEETS_AVAILABLE:
+        return None
+    
+    try:
+        scope = [
+            "https://spreadsheets.google.com/feeds",
+            "https://www.googleapis.com/auth/drive"
+        ]
+        creds = ServiceAccountCredentials.from_json_keyfile_name(
+            GOOGLE_SHEETS_CONFIG["credentials_file"], scope
+        )
+        return gspread.authorize(creds)
+    except Exception as e:
+        print(f"❌ Error al conectar con Google Sheets: {e}")
+        return None
+
+def load_client_master():
+    """
+    Cargar el maestro de clientes desde Google Sheets con caché.
+    El sheet debe tener columnas: POC_ID, RAZON_SOCIAL, LOCALIDAD, SUBCANAL
+    """
+    global _client_cache, _client_cache_time
+    
+    if not GOOGLE_SHEETS_AVAILABLE:
+        return {}
+    
+    now = time.time()
+    
+    # Si el caché es válido, devolverlo
+    if _client_cache and (now - _client_cache_time) < CACHE_TTL:
+        return _client_cache
+    
+    try:
+        gc = get_google_sheet_client()
+        if gc is None:
+            return {}
+        
+        sheet = gc.open_by_key(GOOGLE_SHEETS_CONFIG["sheet_id"])
+        worksheet = sheet.worksheet(GOOGLE_SHEETS_CONFIG["sheet_name"])
+        
+        # Obtener todos los datos
+        records = worksheet.get_all_records()
+        
+        # Construir diccionario POC_ID -> datos
+        client_master = {}
+        for row in records:
+            poc_id = str(row.get("POC_ID", "")).strip()
+            if poc_id:
+                client_master[poc_id] = {
+                    "razon_social": row.get("RAZON_SOCIAL", ""),
+                    "localidad": row.get("LOCALIDAD", ""),
+                    "subcanal": row.get("SUBCANAL", "")
+                }
+        
+        _client_cache = client_master
+        _client_cache_time = now
+        
+        print(f"✅ Clientes cargados desde Google Sheets: {len(client_master)}")
+        return client_master
+        
+    except Exception as e:
+        print(f"❌ Error al cargar maestro de clientes: {e}")
+        print("   Verifica que:")
+        print("   1. El archivo credentials.json existe y es válido")
+        print("   2. El Google Sheet está compartido con la cuenta de servicio")
+        print("   3. El sheet_id es correcto")
+        return {}
+
+def extract_short_poc_id(poc_id):
+    """
+    Extraer el código de cliente del POC ID completo.
+    El prefijo fijo es '0538220000' (10 dígitos).
+    Ejemplos:
+    - 05382200001517 -> 1517
+    - 05382200000823 -> 823
+    - 05382200012345 -> 12345
+    - 053822000654321 -> 654321
+    """
+    if not poc_id:
+        return ""
+    
+    # Convertir a string si es necesario
+    poc_id = str(poc_id).strip()
+    
+    # Si tiene .0 al final, removerlo
+    if poc_id.endswith('.0'):
+        poc_id = poc_id[:-2]
+    
+    # Si tiene guiones o espacios, limpiar
+    poc_id = poc_id.replace('-', '').replace(' ', '')
+    
+    # Prefijo fijo que siempre está al inicio
+    PREFIX = "0538220000"
+    
+    # Si el ID comienza con el prefijo, extraer lo que sigue
+    if poc_id.startswith(PREFIX):
+        return poc_id[len(PREFIX):]
+    
+    # Si el ID es más corto que el prefijo, devolverlo tal cual
+    if len(poc_id) < len(PREFIX):
+        return poc_id
+    
+    # Si no coincide con el prefijo, intentar extraer los últimos caracteres
+    # (caso de respaldo por si el formato cambia)
+    # Buscamos el primer dígito distinto de cero después del prefijo
+    match = re.search(r'0*(\d+)$', poc_id)
+    if match:
+        return match.group(1)
+    
+    # Último recurso: devolver todo
+    return poc_id
+
+def get_client_info(poc_id):
+    """
+    Obtener información de un cliente por POC ID.
+    Primero extrae el código corto (últimos 4 dígitos)
+    """
+    if not poc_id:
+        return None
+    
+    # Extraer el código corto
+    short_id = extract_short_poc_id(poc_id)
+    if not short_id:
+        return None
+    
+    # Buscar en el maestro de clientes
+    master = load_client_master()
+    return master.get(short_id)
 
 # =====================================================
 # DECORADORES
@@ -67,7 +228,6 @@ def _is_visita_valida(value: Any) -> bool:
 
 def _build_task_id(row: pd.Series) -> str:
     """Crear ID único para cada tarea"""
-    # Usar la columna Img (ahora se llama "Img" en la nueva bajada)
     img_value = clean_text(row.get("Img", row.get("Imagen", "")))
     poc_id = clean_text(row.get("POC ID", ""))
     fecha = str(row.get("Fecha", ""))
@@ -81,34 +241,28 @@ def get_mes_actual():
     return datetime.now().strftime("%Y%m")
 
 # =====================================================
-# LOAD DATA - CORREGIDO
+# LOAD DATA
 # =====================================================
 
 def _load_data(path: Path) -> pd.DataFrame:
     """Cargar y filtrar datos del Excel (corregido para la nueva bajada)"""
     global _current_excel, _data_loaded, _current_mes
     
-    # Leer el archivo Excel
     df = pd.read_excel(path, engine="openpyxl")
     _current_excel = path.name
     _current_mes = get_mes_actual()
     
-    # Mapeo de nombres de columnas (nuevos vs antiguos)
-    # La nueva bajada usa "Img" en lugar de "Imagen"
     column_mapping = {
-        "Imagen": "Img",  # Si existe "Imagen", mapear a "Img"
+        "Imagen": "Img",
     }
     
-    # Verificar qué columnas existen y renombrar si es necesario
     for old_name, new_name in column_mapping.items():
         if old_name in df.columns and new_name not in df.columns:
             df = df.rename(columns={old_name: new_name})
     
-    # Columnas requeridas para la app
     required = [
         "Fecha", "Promotor", "POC ID", "Detalle Tarea", 
-        "Img",  # Ahora es "Img" en lugar de "Imagen"
-        "Completada", "Validada", "Visita Valida", 
+        "Img", "Completada", "Validada", "Visita Valida", 
         "Supervisor ID"
     ]
     
@@ -118,14 +272,12 @@ def _load_data(path: Path) -> pd.DataFrame:
     
     df = df.copy()
     
-    # Limpiar datos
     df["Fecha"] = pd.to_numeric(df["Fecha"], errors="coerce").astype("Int64")
     df["Completada"] = pd.to_numeric(df["Completada"], errors="coerce")
     df["Validada"] = pd.to_numeric(df["Validada"], errors="coerce")
     df["Supervisor ID"] = pd.to_numeric(df["Supervisor ID"], errors="coerce").astype("Int64")
     df["VisitaValidaBool"] = df["Visita Valida"].apply(_is_visita_valida)
     
-    # Filtrar tareas: completadas, no validadas, visita válida, supervisor existente
     filtered = df[
         (df["Completada"] == 1.0) &
         (df["Validada"] == 0.0) &
@@ -133,7 +285,6 @@ def _load_data(path: Path) -> pd.DataFrame:
         (df["Supervisor ID"].isin(SUPERVISORS.keys()))
     ].copy()
     
-    # IDs únicos
     filtered = filtered.reset_index(drop=True)
     filtered["row_id"] = range(1, len(filtered) + 1)
     filtered["task_id"] = filtered.apply(_build_task_id, axis=1)
@@ -201,7 +352,6 @@ def api_upload():
     if not f.filename.lower().endswith(".xlsx"):
         return jsonify({"error": "El archivo debe ser .xlsx"}), 400
     
-    # Guardar archivo
     file_path = UPLOAD_DIR / "data.xlsx"
     f.save(str(file_path))
     
@@ -210,7 +360,6 @@ def api_upload():
         _data_loaded = True
         _current_mes = get_mes_actual()
         
-        # Registrar en base de datos
         import sqlite3
         with sqlite3.connect(db.db_path) as conn:
             cursor = conn.cursor()
@@ -247,7 +396,6 @@ def api_tasks():
     start_date = request.args.get("start_date", type=int)
     end_date = request.args.get("end_date", type=int)
     
-    # Filtrar por supervisor
     result = _cached_df[_cached_df["Supervisor ID"] == supervisor_id].copy()
     
     if result.empty:
@@ -256,7 +404,6 @@ def api_tasks():
             "no_tasks": True
         }), 404
     
-    # Filtrar por fechas
     if start_date is not None:
         result = result[result["Fecha"] >= start_date]
     if end_date is not None:
@@ -268,11 +415,9 @@ def api_tasks():
             "no_tasks": True
         }), 404
     
-    # Obtener estados de revisión
     task_ids = result["task_id"].tolist()
     pending_tasks = db.get_pending_tasks(supervisor_id, task_ids)
     
-    # Preparar respuesta
     response_rows = []
     for _, row in result.iterrows():
         task_id = row["task_id"]
@@ -282,15 +427,27 @@ def api_tasks():
         if is_reviewed:
             review = db.get_review_status(task_id, supervisor_id)
         
-        # Usar "Img" como nombre de columna (nueva bajada)
         img_column = "Img" if "Img" in row else "Imagen"
+        
+        # Obtener POC ID original
+        raw_poc_id = clean_text(row.get("POC ID"))
+        
+        # Extraer el código corto (variable: 3, 4, 5 o 6 dígitos)
+        short_poc_id = extract_short_poc_id(raw_poc_id)
+        
+        # Obtener información del cliente desde Google Sheets
+        client_info = get_client_info(raw_poc_id) if raw_poc_id else None
         
         response_rows.append({
             "row_id": int(row["row_id"]),
             "task_id": task_id,
             "fecha": str(int(row["Fecha"])) if not pd.isna(row["Fecha"]) else "",
             "promotor": clean_text(row.get("Promotor")),
-            "poc_id": clean_text(row.get("POC ID")),
+            "poc_id": short_poc_id,  # Código corto (ej: 1517, 823, 12345)
+            "poc_id_completo": raw_poc_id,  # Código completo (ej: 05382200001517)
+            "razon_social": client_info.get("razon_social") if client_info else None,
+            "localidad": client_info.get("localidad") if client_info else None,
+            "subcanal": client_info.get("subcanal") if client_info else None,
             "detalle_tarea": clean_text(row.get("Detalle Tarea")),
             "imagen": clean_text(row.get(img_column, "")),
             "revisado": is_reviewed,
@@ -425,15 +582,12 @@ def api_export_reviews():
         supervisor_name = session.get('supervisor_name')
         mes = _current_mes or get_mes_actual()
         
-        # Obtener todas las revisiones del supervisor
         reviews = db.get_all_reviews(supervisor_id, mes)
         
         if not reviews:
             return jsonify({"error": "No hay revisiones para exportar"}), 404
         
-        # Obtener datos completos de las tareas revisadas
         if _cached_df is None or not _data_loaded:
-            # Si no hay datos del Excel, solo exportar lo que está en la BD
             export_data = []
             for review in reviews:
                 export_data.append({
@@ -450,20 +604,22 @@ def api_export_reviews():
                 })
             df_export = pd.DataFrame(export_data)
         else:
-            # Crear un diccionario para mapear task_id con datos del Excel
             task_data = {}
             img_column = "Img" if "Img" in _cached_df.columns else "Imagen"
             
             for _, row in _cached_df.iterrows():
+                raw_poc_id = clean_text(row.get("POC ID", ""))
+                short_poc_id = extract_short_poc_id(raw_poc_id)
+                
                 task_data[row["task_id"]] = {
                     "fecha": row.get("Fecha", ""),
                     "promotor": row.get("Promotor", ""),
-                    "poc_id": row.get("POC ID", ""),
+                    "poc_id": short_poc_id,
+                    "poc_id_completo": raw_poc_id,
                     "detalle_tarea": row.get("Detalle Tarea", ""),
                     "imagen": row.get(img_column, "")
                 }
             
-            # Construir datos para el Excel con TODOS los campos
             export_data = []
             for review in reviews:
                 task_id = review["task_id"]
@@ -472,6 +628,7 @@ def api_export_reviews():
                 export_data.append({
                     "Fecha Ejecución": task_info.get("fecha", ""),
                     "POC ID": task_info.get("poc_id", ""),
+                    "POC ID Completo": task_info.get("poc_id_completo", ""),
                     "Detalle Tarea": task_info.get("detalle_tarea", ""),
                     "Imagen": task_info.get("imagen", ""),
                     "Promotor": task_info.get("promotor", ""),
@@ -482,19 +639,14 @@ def api_export_reviews():
                 })
             df_export = pd.DataFrame(export_data)
         
-        # Crear archivo Excel en memoria
         output = io.BytesIO()
         
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            # Hoja 1: Detalle de revisiones con TODOS los campos
             df_export.to_excel(writer, sheet_name='Revisiones', index=False)
             
-            # Hoja 2: Resumen por status
             if not df_export.empty and 'Status' in df_export.columns:
                 df_status = df_export.groupby('Status').size().reset_index(name='Cantidad')
                 df_status = df_status.sort_values('Cantidad', ascending=False)
-                
-                # Agregar total
                 total_row = pd.DataFrame({
                     'Status': ['TOTAL'],
                     'Cantidad': [df_status['Cantidad'].sum()]
@@ -502,14 +654,12 @@ def api_export_reviews():
                 df_status = pd.concat([df_status, total_row], ignore_index=True)
                 df_status.to_excel(writer, sheet_name='Resumen por Status', index=False)
             
-            # Hoja 3: Resumen por promotor
             if not df_export.empty and 'Promotor' in df_export.columns and 'Status' in df_export.columns:
                 df_promotor = df_export.groupby(['Promotor', 'Status']).size().unstack(fill_value=0)
                 df_promotor['Total'] = df_promotor.sum(axis=1)
                 df_promotor = df_promotor.sort_values('Total', ascending=False)
                 df_promotor.to_excel(writer, sheet_name='Resumen por Promotor')
             
-            # Hoja 4: Información del reporte
             info_data = {
                 'Supervisor': [supervisor_name],
                 'ID Supervisor': [supervisor_id],
@@ -520,7 +670,6 @@ def api_export_reviews():
             df_info = pd.DataFrame(info_data)
             df_info.to_excel(writer, sheet_name='Info Reporte', index=False)
             
-            # Autoajustar columnas en todas las hojas
             for sheet_name in writer.sheets:
                 worksheet = writer.sheets[sheet_name]
                 for column in worksheet.columns:
@@ -571,7 +720,6 @@ def api_close_month():
         if not reviews:
             return jsonify({"error": "No hay revisiones para exportar"}), 404
         
-        # Obtener datos completos de las tareas revisadas
         if _cached_df is None or not _data_loaded:
             export_data = []
             for review in reviews:
@@ -588,20 +736,22 @@ def api_close_month():
                 })
             df_export = pd.DataFrame(export_data)
         else:
-            # Crear un diccionario para mapear task_id con datos del Excel
             task_data = {}
             img_column = "Img" if "Img" in _cached_df.columns else "Imagen"
             
             for _, row in _cached_df.iterrows():
+                raw_poc_id = clean_text(row.get("POC ID", ""))
+                short_poc_id = extract_short_poc_id(raw_poc_id)
+                
                 task_data[row["task_id"]] = {
                     "fecha": row.get("Fecha", ""),
                     "promotor": row.get("Promotor", ""),
-                    "poc_id": row.get("POC ID", ""),
+                    "poc_id": short_poc_id,
+                    "poc_id_completo": raw_poc_id,
                     "detalle_tarea": row.get("Detalle Tarea", ""),
                     "imagen": row.get(img_column, "")
                 }
             
-            # Construir datos para el Excel con TODOS los campos
             export_data = []
             for review in reviews:
                 task_id = review["task_id"]
@@ -610,6 +760,7 @@ def api_close_month():
                 export_data.append({
                     "Fecha Ejecución": task_info.get("fecha", ""),
                     "POC ID": task_info.get("poc_id", ""),
+                    "POC ID Completo": task_info.get("poc_id_completo", ""),
                     "Detalle Tarea": task_info.get("detalle_tarea", ""),
                     "Imagen": task_info.get("imagen", ""),
                     "Promotor": task_info.get("promotor", ""),
@@ -620,7 +771,6 @@ def api_close_month():
                 })
             df_export = pd.DataFrame(export_data)
         
-        # Crear archivo Excel en memoria
         output = io.BytesIO()
         
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
@@ -671,10 +821,8 @@ def api_close_month():
         
         filename = f"cierre_mes_{supervisor_name}_{mes}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
         
-        # Eliminar revisiones del mes actual
         db.clear_reviews(supervisor_id, mes)
         
-        # Limpiar archivo Excel subido
         file_path = UPLOAD_DIR / "data.xlsx"
         if file_path.exists():
             file_path.unlink()
@@ -694,6 +842,24 @@ def api_close_month():
     except Exception as e:
         print(f"Error en cierre de mes: {e}")
         return jsonify({"error": str(e)}), 500
+
+
+# =====================================================
+# ENDPOINT DE PRUEBA PARA VERIFICAR EXTRACCIÓN DE POC ID
+# =====================================================
+
+@app.route("/api/test_poc/<poc_id>")
+@login_required
+def test_poc(poc_id):
+    """Endpoint de prueba para verificar la extracción del POC ID"""
+    short_id = extract_short_poc_id(poc_id)
+    client_info = get_client_info(poc_id)
+    
+    return jsonify({
+        "poc_id_original": poc_id,
+        "poc_id_extraido": short_id,
+        "cliente": client_info
+    })
 
 
 # =====================================================
