@@ -631,6 +631,20 @@ def test_poc(poc_id):
         "extraido": short
     })
 
+@app.route("/api/test_sheets")
+@login_required
+def test_sheets():
+    """Probar conexión a Google Sheets"""
+    try:
+        master = load_client_master()
+        return jsonify({
+            "total_clientes": len(master),
+            "primeros_5": dict(list(master.items())[:5]),
+            "todos_los_ids": list(master.keys())[:10]
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 @app.route("/api/export_reviews", methods=["GET"])
 @login_required
 def api_export_reviews():
