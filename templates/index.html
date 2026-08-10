@@ -541,12 +541,6 @@
             padding: 15px;
         }
         
-        .photo-card .info .task-id {
-            font-size: 11px;
-            color: var(--azul-venier-claro);
-            font-family: monospace;
-        }
-        
         .photo-card .info .promotor {
             font-weight: 700;
             color: var(--azul-venier);
@@ -987,39 +981,45 @@
         /* =============================================
             CLIENTE INFO
             ============================================= */
-        .client-info {
+        .cliente-block {
             background: #f0f4f8;
-            padding: 8px 10px;
+            padding: 10px 12px;
             border-radius: 6px;
             border-left: 3px solid var(--azul-venier);
             font-size: 13px;
-            color: #444;
+            color: #333;
             margin-top: 4px;
-            line-height: 1.5;
+            line-height: 1.6;
         }
 
-        .client-info .label {
-            font-weight: 600;
-            color: var(--azul-venier);
-        }
-
-        .client-info .poc-id {
-            font-weight: 600;
+        .cliente-block .poc-id {
+            font-weight: 700;
             color: var(--azul-venier);
             font-family: monospace;
-            font-size: 14px;
+            font-size: 15px;
         }
 
-        .direccion-block {
-            margin-top: 6px;
-            padding-top: 6px;
-            border-top: 1px dashed #ddd;
-            font-size: 13px;
+        .cliente-block .nombre-cliente {
+            font-weight: 600;
+            color: #1a1a1a;
+        }
+
+        .cliente-block .direccion-cliente {
             color: #555;
+            font-size: 12px;
+            margin-top: 2px;
         }
 
-        .direccion-block strong {
-            color: var(--azul-venier);
+        .cliente-block .label {
+            font-weight: 600;
+            color: var(--azul-venier-claro);
+            font-size: 11px;
+            text-transform: uppercase;
+        }
+
+        .cliente-divider {
+            border-top: 1px dashed #ddd;
+            margin: 4px 0;
         }
 
     </style>
@@ -1118,11 +1118,11 @@
             <div class="filters">
                 <div class="filter-group">
                     <label>Fecha Desde</label>
-                    <input type="number" id="filterStartDate" placeholder="YYYYMMDD">
+                    <input type="text" id="filterStartDate" placeholder="DD/MM/YYYY">
                 </div>
                 <div class="filter-group">
                     <label>Fecha Hasta</label>
-                    <input type="number" id="filterEndDate" placeholder="YYYYMMDD">
+                    <input type="text" id="filterEndDate" placeholder="DD/MM/YYYY">
                 </div>
                 <div class="filter-group">
                     <label>Status</label>
@@ -1449,46 +1449,35 @@
                 
                 // POC ID (código corto)
                 if (task.poc_id) {
-                    clienteHtml += `<span style="font-weight: 600; color: var(--azul-venier);">🔑 ${task.poc_id}</span>`;
+                    clienteHtml += `<span class="poc-id">🔑 ${task.poc_id}</span>`;
                 }
                 
                 // Razón Social
                 if (task.razon_social) {
-                    clienteHtml += ` | 🏢 ${task.razon_social}`;
+                    clienteHtml += ` <span class="nombre-cliente">${task.razon_social}</span>`;
                 }
                 
-                // Localidad
-                if (task.localidad) {
-                    clienteHtml += ` | 📍 ${task.localidad}`;
-                }
-                
-                // Subcanal
-                if (task.subcanal) {
-                    clienteHtml += ` | 🏷️ ${task.subcanal}`;
-                }
-                
-                // Dirección (si existe)
+                // Dirección
                 let direccionHtml = '';
                 if (task.direccion) {
                     direccionHtml = `
-                        <div class="direccion-block">
-                            <strong>📍 Dirección:</strong> ${task.direccion}
-                        </div>
+                        <div class="cliente-divider"></div>
+                        <div class="direccion-cliente">📍 ${task.direccion}</div>
                     `;
                 }
                 
                 // Si no hay información del cliente
-                if (!clienteHtml) {
+                if (!clienteHtml && !direccionHtml) {
                     clienteHtml = '⚠️ Sin información de cliente';
                 }
                 // =============================================
                 
-                // Fecha ya viene formateada desde el backend, pero por si acaso
+                // Fecha
                 let fechaMostrada = task.fecha || 'Sin fecha';
                 
                 return `
                     <div class="photo-card" data-task-id="${task.task_id}">
-                        <div class="image-container" onclick="openModal('${task.imagen || ''}', '${task.promotor || ''}', '${task.poc_id || ''}', '${task.razon_social || ''}', '${task.localidad || ''}', '${task.subcanal || ''}', '${task.direccion || ''}')">
+                        <div class="image-container" onclick="openModal('${task.imagen || ''}', '${task.promotor || ''}', '${task.poc_id || ''}', '${task.razon_social || ''}', '${task.direccion || ''}')">
                             ${task.imagen ? 
                                 `<img src="${task.imagen}" alt="Foto" onerror="this.parentElement.innerHTML='<div class=\\'no-image\\'>📷 Sin imagen</div>'">` :
                                 `<div class="no-image">📷 Sin imagen</div>`
@@ -1501,7 +1490,7 @@
                                 📅 ${fechaMostrada}
                             </div>
                             <!-- Bloque de información del cliente -->
-                            <div class="details" style="font-size: 13px; color: #444; margin-top: 4px; padding: 8px 10px; background: #f0f4f8; border-radius: 6px; border-left: 3px solid var(--azul-venier);">
+                            <div class="cliente-block">
                                 ${clienteHtml}
                                 ${direccionHtml}
                             </div>
@@ -1663,7 +1652,7 @@
         // ZOOM DE IMAGEN (MODAL)
         // =============================================
         
-        function openModal(imageUrl, promotor, pocId, razonSocial, localidad, subcanal, direccion) {
+        function openModal(imageUrl, promotor, pocId, razonSocial, direccion) {
             if (!imageUrl) {
                 showToast('No hay imagen para ampliar', 'error');
                 return;
@@ -1680,8 +1669,6 @@
             if (promotor) infoParts.push(`👤 ${promotor}`);
             if (pocId) infoParts.push(`🔑 ${pocId}`);
             if (razonSocial) infoParts.push(`🏢 ${razonSocial}`);
-            if (localidad) infoParts.push(`📍 ${localidad}`);
-            if (subcanal) infoParts.push(`🏷️ ${subcanal}`);
             if (direccion) infoParts.push(`📍 ${direccion}`);
             
             modalInfo.textContent = infoParts.join(' | ') || 'Sin información';
