@@ -137,10 +137,12 @@ def extract_short_poc_id(poc_id):
     """
     Extraer el código de cliente del POC ID completo.
     El prefijo fijo es '0538220000' (10 dígitos).
+    También maneja POC IDs que comienzan con '53822' (sin el cero inicial).
     Ejemplos:
     - 05382200005533 -> 5533
-    - 05382200001517 -> 1517
-    - 05382200000823 -> 823
+    - 5382200005533 -> 5533
+    - 05382200008232 -> 8232
+    - 5382200008232 -> 8232
     """
     if not poc_id:
         return ""
@@ -152,18 +154,26 @@ def extract_short_poc_id(poc_id):
     if poc_id.endswith('.0'):
         poc_id = poc_id[:-2]
     
-    # Prefijo fijo
-    PREFIX = "0538220000"
+    # Si tiene guiones o espacios, limpiar
+    poc_id = poc_id.replace('-', '').replace(' ', '')
     
-    # Si el ID comienza con el prefijo, extraer lo que sigue
-    if poc_id.startswith(PREFIX):
-        return poc_id[len(PREFIX):]
+    # Prefijos posibles
+    PREFIX_FULL = "0538220000"  # 10 dígitos
+    PREFIX_SHORT = "53822"      # 5 dígitos (sin el cero inicial)
     
-    # Si es más corto, devolverlo tal cual
-    if len(poc_id) < len(PREFIX):
+    # Si el ID comienza con el prefijo completo (10 dígitos)
+    if poc_id.startswith(PREFIX_FULL):
+        return poc_id[len(PREFIX_FULL):]
+    
+    # Si el ID comienza con el prefijo corto (5 dígitos)
+    if poc_id.startswith(PREFIX_SHORT):
+        return poc_id[len(PREFIX_SHORT):]
+    
+    # Si es más corto que el prefijo, devolverlo tal cual
+    if len(poc_id) < len(PREFIX_FULL):
         return poc_id
     
-    # Si no coincide, intentar extraer los últimos números
+    # Si no coincide con ningún prefijo, intentar extraer los últimos números
     match = re.search(r'0*(\d+)$', poc_id)
     if match:
         return match.group(1)
@@ -234,20 +244,34 @@ def get_mes_actual():
 
 def formatear_fecha(fecha_valor):
     """
-    Formatear fecha de DD/MM/YYYY a DD/MM/YYYY (mantener formato)
-    o de YYYYMMDD a DD/MM/YYYY
+    Formatear fecha a DD/MM/YYYY.
+    Maneja: datetime, string YYYY-MM-DD, YYYYMMDD, o timestamp de Excel
     """
     if pd.isna(fecha_valor):
         return ""
     
+    # Si es datetime
+    if isinstance(fecha_valor, (datetime, pd.Timestamp)):
+        return fecha_valor.strftime("%d/%m/%Y")
+    
+    # Si es string
     fecha_str = str(fecha_valor).strip()
     
     # Si ya tiene barras (DD/MM/YYYY), devolver igual
     if '/' in fecha_str:
         return fecha_str
     
-    # Si es YYYYMMDD (ej: 20260810)
-    if len(fecha_str) == 8 and fecha_str.isdigit():
+    # Si es YYYY-MM-DD (ej: 2026-08-03)
+    if '-' in fecha_str:
+        partes = fecha_str.split('-')
+        if len(partes) == 3:
+            año = partes[0]
+            mes = partes[1]
+            dia = partes[2].split(' ')[0]  # Quitar la hora si existe
+            return f"{dia}/{mes}/{año}"
+    
+    # Si es YYYYMMDD (ej: 20260803)
+    if len(fecha_str) >= 8 and fecha_str[:8].isdigit():
         año = fecha_str[0:4]
         mes = fecha_str[4:6]
         dia = fecha_str[6:8]
@@ -462,10 +486,10 @@ def api_tasks():
             "no_tasks": True
         }), 404
     
-    # Filtrar por fechas (la fecha viene como string en el Excel)
+    # Filtrar por fechas
     if start_date:
         try:
-            # Convertir DD/MM/YYYY a string para comparar
+            # Convertir fecha a string para comparar
             result = result[result["Fecha"].astype(str) >= start_date]
         except:
             pass
@@ -504,9 +528,8 @@ def api_tasks():
         # Obtener información del cliente desde Google Sheets
         client_info = get_client_info(raw_poc_id) if raw_poc_id else None
         
-        # Obtener fecha (ya viene en formato DD/MM/YYYY del Excel)
-        fecha_raw = row.get("Fecha")
-        fecha_formateada = formatear_fecha(fecha_raw)
+        # Obtener fecha
+        fecha_formateada = formatear_fecha(row.get("Fecha"))
         
         # Obtener URL de imagen (usar Img o TaskImageUrl)
         img_url = clean_text(row.get("Img", ""))
@@ -520,6 +543,7 @@ def api_tasks():
             "promotor": clean_text(row.get("Promotor")),
             "poc_id": short_poc_id,
             "poc_id_completo": raw_poc_id,
+            "cliente_id": short_poc_id,  # ClienteID desde Sheets
             "razon_social": client_info.get("nombre") if client_info else None,
             "direccion": client_info.get("direccion") if client_info else None,
             "detalle_tarea": clean_text(row.get("Detalle Tarea")),
@@ -667,11 +691,12 @@ def api_export_reviews():
                 export_data.append({
                     "Fecha Ejecución": "",
                     "POC ID": "",
+                    "Cliente ID": "",
+                    "Razón Social": "",
+                    "Direccion": "",
                     "Detalle Tarea": "",
                     "Imagen": "",
                     "Promotor": "",
-                    "Nombre Cliente": "",
-                    "Direccion": "",
                     "Status": review["status"],
                     "Observaciones": review.get("observaciones", ""),
                     "Supervisor": review["supervisor_name"],
@@ -694,6 +719,7 @@ def api_export_reviews():
                     "promotor": row.get("Promotor", ""),
                     "poc_id": short_poc_id,
                     "poc_id_completo": raw_poc_id,
+                    "cliente_id": short_poc_id,
                     "razon_social": client_info.get("nombre") if client_info else "",
                     "direccion": client_info.get("direccion") if client_info else "",
                     "detalle_tarea": row.get("Detalle Tarea", ""),
@@ -709,7 +735,8 @@ def api_export_reviews():
                     "Fecha Ejecución": task_info.get("fecha", ""),
                     "POC ID": task_info.get("poc_id", ""),
                     "POC ID Completo": task_info.get("poc_id_completo", ""),
-                    "Nombre Cliente": task_info.get("razon_social", ""),
+                    "Cliente ID": task_info.get("cliente_id", ""),
+                    "Razón Social": task_info.get("razon_social", ""),
                     "Direccion": task_info.get("direccion", ""),
                     "Detalle Tarea": task_info.get("detalle_tarea", ""),
                     "Imagen": task_info.get("imagen", ""),
@@ -808,11 +835,12 @@ def api_close_month():
                 export_data.append({
                     "Fecha Ejecución": "",
                     "POC ID": "",
+                    "Cliente ID": "",
+                    "Razón Social": "",
+                    "Direccion": "",
                     "Detalle Tarea": "",
                     "Imagen": "",
                     "Promotor": "",
-                    "Nombre Cliente": "",
-                    "Direccion": "",
                     "Status": review["status"],
                     "Observaciones": review.get("observaciones", ""),
                     "Supervisor": review["supervisor_name"],
@@ -835,6 +863,7 @@ def api_close_month():
                     "promotor": row.get("Promotor", ""),
                     "poc_id": short_poc_id,
                     "poc_id_completo": raw_poc_id,
+                    "cliente_id": short_poc_id,
                     "razon_social": client_info.get("nombre") if client_info else "",
                     "direccion": client_info.get("direccion") if client_info else "",
                     "detalle_tarea": row.get("Detalle Tarea", ""),
@@ -850,7 +879,8 @@ def api_close_month():
                     "Fecha Ejecución": task_info.get("fecha", ""),
                     "POC ID": task_info.get("poc_id", ""),
                     "POC ID Completo": task_info.get("poc_id_completo", ""),
-                    "Nombre Cliente": task_info.get("razon_social", ""),
+                    "Cliente ID": task_info.get("cliente_id", ""),
+                    "Razón Social": task_info.get("razon_social", ""),
                     "Direccion": task_info.get("direccion", ""),
                     "Detalle Tarea": task_info.get("detalle_tarea", ""),
                     "Imagen": task_info.get("imagen", ""),
