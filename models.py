@@ -2,10 +2,18 @@
 import sqlite3
 from datetime import datetime
 from typing import Optional, List, Dict
+from pathlib import Path
+
+# Obtener la ruta ABSOLUTA del directorio del proyecto
+BASE_DIR = Path(__file__).resolve().parent
 
 class ReviewDatabase:
-    def __init__(self, db_path="reviews.db"):
-        self.db_path = db_path
+    def __init__(self, db_path=None):
+        # Si no se especifica, usar la ruta ABSOLUTA
+        if db_path is None:
+            db_path = BASE_DIR / "reviews.db"
+        self.db_path = str(db_path)
+        print(f"📁 Base de datos en: {self.db_path}")
         self._init_db()
     
     def _init_db(self):
@@ -27,13 +35,11 @@ class ReviewDatabase:
                     UNIQUE(task_id, supervisor_id)
                 );
                 
-                -- Índices para búsquedas rápidas
                 CREATE INDEX IF NOT EXISTS idx_task_id ON reviews(task_id);
                 CREATE INDEX IF NOT EXISTS idx_supervisor ON reviews(supervisor_id);
                 CREATE INDEX IF NOT EXISTS idx_status ON reviews(status);
                 CREATE INDEX IF NOT EXISTS idx_mes ON reviews(mes_revision);
                 
-                -- Tabla para control de archivos cargados
                 CREATE TABLE IF NOT EXISTS uploaded_files (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     filename TEXT NOT NULL,
@@ -43,6 +49,7 @@ class ReviewDatabase:
                     mes_revision TEXT
                 );
             """)
+            print("✅ Base de datos inicializada")
     
     def save_review(self, task_id: str, row_id: int, supervisor_id: int, 
                     supervisor_name: str, status: str, observaciones: str = "",
@@ -52,7 +59,6 @@ class ReviewDatabase:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 
-                # Verificar si ya existe
                 cursor.execute("""
                     SELECT id FROM reviews 
                     WHERE task_id = ? AND supervisor_id = ?
@@ -61,14 +67,12 @@ class ReviewDatabase:
                 existing = cursor.fetchone()
                 
                 if existing:
-                    # Actualizar
                     cursor.execute("""
                         UPDATE reviews 
                         SET status = ?, observaciones = ?, fecha_revision = CURRENT_TIMESTAMP
                         WHERE task_id = ? AND supervisor_id = ?
                     """, (status, observaciones, task_id, supervisor_id))
                 else:
-                    # Insertar nuevo
                     cursor.execute("""
                         INSERT INTO reviews 
                         (task_id, row_id, supervisor_id, supervisor_name, status, 
@@ -78,9 +82,10 @@ class ReviewDatabase:
                           observaciones, excel_file, mes_revision))
                 
                 conn.commit()
+                print(f"✅ Revisión guardada: {task_id} -> {status}")
                 return True
         except Exception as e:
-            print(f"Error al guardar revisión: {e}")
+            print(f"❌ Error al guardar revisión: {e}")
             return False
     
     def get_review_status(self, task_id: str, supervisor_id: int) -> Optional[Dict]:
@@ -213,6 +218,7 @@ class ReviewDatabase:
                     """, (supervisor_id,))
                 
                 conn.commit()
+                print(f"✅ Revisiones limpiadas para supervisor {supervisor_id}")
                 return True
         except Exception as e:
             print(f"Error al limpiar revisiones: {e}")
@@ -228,6 +234,7 @@ class ReviewDatabase:
                     WHERE task_id = ? AND supervisor_id = ?
                 """, (task_id, supervisor_id))
                 conn.commit()
+                print(f"✅ Revisión eliminada: {task_id}")
                 return True
         except Exception as e:
             print(f"Error al eliminar revisión: {e}")
