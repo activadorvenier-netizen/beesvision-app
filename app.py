@@ -1,4 +1,4 @@
-# app.py - VERSIÓN FINAL CORREGIDA
+# app.py - VERSIÓN SIMPLE Y FUNCIONANDO
 from __future__ import annotations
 from pathlib import Path
 from typing import Any
@@ -9,28 +9,15 @@ import hashlib
 from datetime import datetime
 import io
 from models import ReviewDatabase
-import time
+import json
 import re
-
-# =====================================================
-# IMPORTS PARA GOOGLE SHEETS
-# =====================================================
-try:
-    import gspread
-    from oauth2client.service_account import ServiceAccountCredentials
-    GOOGLE_SHEETS_AVAILABLE = True
-except ImportError:
-    GOOGLE_SHEETS_AVAILABLE = False
-    print("⚠️ gspread no instalado")
 
 BASE_DIR = Path(__file__).resolve().parent
 UPLOAD_DIR = BASE_DIR / "uploads"
 UPLOAD_DIR.mkdir(exist_ok=True)
 
-# Base de datos
 db = ReviewDatabase()
 
-# Supervisores
 SUPERVISORS = {
     14: "Bruno Del Popolo",
     17: "Franco Vivani",
@@ -40,177 +27,32 @@ SUPERVISORS = {
 app = Flask(__name__)
 app.secret_key = "clave_secreta_para_desarrollo"
 
-# Cache de datos
 _cached_df = None
 _current_excel = None
 _data_loaded = False
 _current_mes = None
 
 # =====================================================
-# CONFIGURACIÓN DE GOOGLE SHEETS
+# CARGAR CLIENTES DESDE JSON (FUNCIONA SIEMPRE)
 # =====================================================
 
-GOOGLE_SHEETS_CONFIG = {
-    "sheet_id": "12D-Ru8GNm0EE0NFg4kpcygqcPdqKpor9U4NOA-1TQRs",
-    "sheet_name": "Clientes",
-    "credentials_file": "credentials.json"
-}
+def cargar_clientes_json():
+    """Cargar clientes desde clientes.json"""
+    try:
+        json_path = BASE_DIR / "clientes.json"
+        if json_path.exists():
+            with open(json_path, 'r', encoding='utf-8') as f:
+                clientes = json.load(f)
+            print(f"✅ Clientes cargados desde JSON: {len(clientes)}")
+            return clientes
+    except Exception as e:
+        print(f"❌ Error cargando JSON: {e}")
+    return {}
 
-_client_cache = {}
-_client_cache_time = 0
-CACHE_TTL = 600
-
-# =====================================================
-# CLIENTES LOCALES (RESPALDO)
-# =====================================================
-
-CLIENTES_LOCALES = {
-    "1875": {
-        "nombre": "GRAU ADRIAN",
-        "direccion": "CHABAS - ESPAÑA - 2151"
-    },
-    "502": {
-        "nombre": "CLIENTE 502",
-        "direccion": "DIRECCION 502"
-    }
-}
+CLIENTES = cargar_clientes_json()
 
 # =====================================================
 # FUNCIONES
-# =====================================================
-
-def get_google_sheet_client():
-    """Obtener conexión a Google Sheets"""
-    if not GOOGLE_SHEETS_AVAILABLE:
-        return None
-    try:
-        scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-        creds = ServiceAccountCredentials.from_json_keyfile_name(
-            GOOGLE_SHEETS_CONFIG["credentials_file"], scope
-        )
-        return gspread.authorize(creds)
-    except Exception as e:
-        print(f"❌ Error al conectar con Google Sheets: {e}")
-        return None
-
-def load_client_master():
-    """Cargar el maestro de clientes desde Google Sheets con caché"""
-    global _client_cache, _client_cache_time
-    
-    if not GOOGLE_SHEETS_AVAILABLE:
-        return {}
-    
-    now = time.time()
-    if _client_cache and (now - _client_cache_time) < CACHE_TTL:
-        return _client_cache
-    
-    try:
-        gc = get_google_sheet_client()
-        if gc is None:
-            return {}
-        
-        sheet = gc.open_by_key(GOOGLE_SHEETS_CONFIG["sheet_id"])
-        worksheet = sheet.worksheet(GOOGLE_SHEETS_CONFIG["sheet_name"])
-        records = worksheet.get_all_records()
-        
-        client_master = {}
-        for row in records:
-            cliente_id = str(row.get("ClienteID", "")).strip()
-            if cliente_id:
-                client_master[cliente_id] = {
-                    "nombre": row.get("Nombre", ""),
-                    "direccion": row.get("Direccion", "")
-                }
-        
-        _client_cache = client_master
-        _client_cache_time = now
-        print(f"✅ Clientes cargados desde Google Sheets: {len(client_master)}")
-        return client_master
-        
-    except Exception as e:
-        print(f"❌ Error al cargar maestro de clientes: {e}")
-        return {}
-
-def extract_short_poc_id(poc_id):
-    """
-    Extraer el código de cliente del POC ID completo.
-    Maneja ambos formatos:
-    - Con 0 inicial: 05382200001875 -> 1875
-    - Sin 0 inicial: 5382200001875 -> 1875
-    """
-    if not poc_id:
-        return ""
-    
-    poc_id = str(poc_id).strip()
-    
-    if poc_id.endswith('.0'):
-        poc_id = poc_id[:-2]
-    
-    poc_id = poc_id.replace('-', '').replace(' ', '')
-    
-    # Prefijos posibles
-    PREFIX_CON_CERO = "053822"    # 6 dígitos con cero
-    PREFIX_SIN_CERO = "53822"     # 5 dígitos sin cero
-    
-    resultado = poc_id
-    
-    # Si empieza con el prefijo CON cero (053822)
-    if poc_id.startswith(PREFIX_CON_CERO):
-        resultado = poc_id[len(PREFIX_CON_CERO):]
-    # Si empieza con el prefijo SIN cero (53822)
-    elif poc_id.startswith(PREFIX_SIN_CERO):
-        resultado = poc_id[len(PREFIX_SIN_CERO):]
-    
-    # Eliminar ceros a la izquierda
-    resultado = resultado.lstrip('0')
-    
-    return resultado if resultado else "0"
-
-def get_client_info(poc_id):
-    """
-    Obtener información de un cliente por POC ID.
-    1. Extrae el código corto del POC ID (ej: 05382200001875 -> 1875)
-    2. Busca ese código en Google Sheets
-    3. Si no encuentra, busca en CLIENTES_LOCALES
-    """
-    if not poc_id:
-        return None
-    
-    # Extraer el código corto del cliente
-    short_id = extract_short_poc_id(poc_id)
-    if not short_id or short_id == "0":
-        return None
-    
-    print(f"🔍 Buscando cliente: {short_id} (POC ID: {poc_id})")
-    
-    # BUSCAR EN GOOGLE SHEETS
-    master = load_client_master()
-    if master and short_id in master:
-        print(f"✅ Cliente encontrado en SHEETS: {short_id} -> {master[short_id]['nombre']}")
-        return master[short_id]
-    
-    # BUSCAR EN CLIENTES LOCALES (RESPALDO)
-    if short_id in CLIENTES_LOCALES:
-        print(f"✅ Cliente encontrado en LOCAL: {short_id} -> {CLIENTES_LOCALES[short_id]['nombre']}")
-        return CLIENTES_LOCALES[short_id]
-    
-    print(f"⚠️ Cliente NO ENCONTRADO: {short_id}")
-    return None
-
-# =====================================================
-# DECORADORES
-# =====================================================
-
-def login_required(f):
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        if 'supervisor_id' not in session:
-            return jsonify({"error": "No autorizado"}), 401
-        return f(*args, **kwargs)
-    return decorated_function
-
-# =====================================================
-# HELPERS
 # =====================================================
 
 def clean_text(value: Any) -> str:
@@ -228,6 +70,48 @@ def _is_visita_valida(value: Any) -> bool:
     text = str(value).strip().upper()
     return text in {"VERDADERO", "TRUE", "1", "1.0", "SI", "YES"}
 
+def extract_short_poc_id(poc_id):
+    """Extraer código corto del POC ID"""
+    if not poc_id:
+        return ""
+    
+    poc_id = str(poc_id).strip()
+    if poc_id.endswith('.0'):
+        poc_id = poc_id[:-2]
+    poc_id = poc_id.replace('-', '').replace(' ', '')
+    
+    # Prefijo 053822 (con 0) o 53822 (sin 0)
+    if poc_id.startswith("053822"):
+        resultado = poc_id[6:].lstrip('0')
+        return resultado if resultado else "0"
+    if poc_id.startswith("53822"):
+        resultado = poc_id[5:].lstrip('0')
+        return resultado if resultado else "0"
+    
+    return poc_id.lstrip('0') or "0"
+
+def get_client_info(poc_id):
+    """Obtener datos del cliente desde JSON"""
+    if not poc_id:
+        return None
+    
+    short_id = extract_short_poc_id(poc_id)
+    if not short_id or short_id == "0":
+        return None
+    
+    if short_id in CLIENTES:
+        return CLIENTES[short_id]
+    
+    return None
+
+def login_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if 'supervisor_id' not in session:
+            return jsonify({"error": "No autorizado"}), 401
+        return f(*args, **kwargs)
+    return decorated_function
+
 def _build_task_id(row: pd.Series) -> str:
     img_value = clean_text(row.get("Img", ""))
     poc_id = clean_text(row.get("POC ID", ""))
@@ -240,7 +124,6 @@ def get_mes_actual():
     return datetime.now().strftime("%Y%m")
 
 def formatear_fecha(fecha_valor):
-    """Formatear fecha a DD/MM/YYYY"""
     if pd.isna(fecha_valor):
         return ""
     
@@ -268,56 +151,15 @@ def formatear_fecha(fecha_valor):
     
     return fecha_str
 
-# =====================================================
-# LOAD DATA
-# =====================================================
-
 def _load_data(path: Path) -> pd.DataFrame:
     global _current_excel, _data_loaded, _current_mes
     
-    print(f"📂 Cargando archivo: {path.name}")
     df = pd.read_excel(path, engine="openpyxl")
     _current_excel = path.name
     _current_mes = get_mes_actual()
     
-    # Renombrar TaskImageUrl a Img si existe
     if "TaskImageUrl" in df.columns and "Img" not in df.columns:
         df = df.rename(columns={"TaskImageUrl": "Img"})
-    
-    # =====================================================
-    # NUEVO: AGREGAR DATOS DEL CLIENTE AUTOMÁTICAMENTE
-    # =====================================================
-    
-    # Verificar si existe la columna POC ID
-    if "POC ID" in df.columns:
-        print("🔍 Procesando POC IDs para agregar datos de clientes...")
-        
-        # Cargar clientes desde Sheets
-        master = load_client_master()
-        
-        # Crear listas para las nuevas columnas
-        razon_social = []
-        localidad = []
-        
-        # Procesar cada fila
-        for _, row in df.iterrows():
-            poc_id = clean_text(row.get("POC ID", ""))
-            short_id = extract_short_poc_id(poc_id)
-            
-            if master and short_id and short_id in master:
-                razon_social.append(master[short_id]["nombre"])
-                localidad.append(master[short_id]["direccion"])
-            else:
-                razon_social.append("")
-                localidad.append("")
-        
-        # Agregar las columnas al DataFrame
-        df["RazonSocial"] = razon_social
-        df["Localidad"] = localidad
-        
-        print(f"✅ Columnas 'RazonSocial' y 'Localidad' agregadas")
-    
-    # =====================================================
     
     required = ["Fecha", "Promotor", "POC ID", "Detalle Tarea", "Img", "Completada", "Validada", "Visita Valida", "Supervisor ID"]
     
@@ -486,16 +328,11 @@ def api_tasks():
         raw_poc_id = clean_text(row.get("POC ID"))
         short_poc_id = extract_short_poc_id(raw_poc_id)
         
+        client_info = get_client_info(raw_poc_id)
+        
         img_url = clean_text(row.get("Img", ""))
         if not img_url:
             img_url = clean_text(row.get("TaskImageUrl", ""))
-        
-        # =====================================================
-        # USAR LOS DATOS DEL CLIENTE QUE YA AGREGAMOS
-        # =====================================================
-        razon_social = clean_text(row.get("RazonSocial", ""))
-        localidad = clean_text(row.get("Localidad", ""))
-        # =====================================================
         
         response_rows.append({
             "row_id": int(row["row_id"]),
@@ -505,8 +342,8 @@ def api_tasks():
             "poc_id": short_poc_id,
             "poc_id_completo": raw_poc_id,
             "cliente_id": short_poc_id,
-            "razon_social": razon_social if razon_social else "SIN DATO",
-            "direccion": localidad if localidad else "SIN DATO",
+            "razon_social": client_info.get("nombre") if client_info else "SIN DATO",
+            "direccion": client_info.get("direccion") if client_info else "SIN DATO",
             "detalle_tarea": clean_text(row.get("Detalle Tarea")),
             "imagen": img_url,
             "revisado": is_reviewed,
@@ -516,6 +353,10 @@ def api_tasks():
         })
     
     return jsonify(response_rows)
+
+# =====================================================
+# LAS DEMÁS RUTAS (save_review, delete_review, stats, supervisors, export_reviews, close_month)
+# =====================================================
 
 @app.route("/api/save_review", methods=["POST"])
 @login_required
@@ -619,55 +460,6 @@ def api_stats():
 def api_supervisors():
     items = [{"id": sid, "name": name} for sid, name in SUPERVISORS.items()]
     return jsonify(items)
-
-# =====================================================
-# ENDPOINTS DE PRUEBA (OPCIONALES)
-# =====================================================
-
-@app.route("/api/test_poc/<poc_id>")
-@login_required
-def test_poc(poc_id):
-    """Probar extracción de POC ID"""
-    short = extract_short_poc_id(poc_id)
-    return jsonify({
-        "original": poc_id,
-        "extraido": short
-    })
-
-@app.route("/api/test_sheets")
-@login_required
-def test_sheets():
-    """Probar conexión a Google Sheets"""
-    try:
-        master = load_client_master()
-        return jsonify({
-            "total_clientes": len(master),
-            "primeros_5": dict(list(master.items())[:5]),
-            "todos_los_ids": list(master.keys())[:10]
-        })
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-@app.route("/api/verificar_cliente/<poc_id>")
-@login_required
-def verificar_cliente(poc_id):
-    """Verificar si un cliente existe en Sheets"""
-    client_info = get_client_info(poc_id)
-    short_id = extract_short_poc_id(poc_id)
-    master = load_client_master()
-    
-    return jsonify({
-        "poc_id_recibido": poc_id,
-        "codigo_extraido": short_id,
-        "cliente_encontrado": client_info is not None,
-        "cliente": client_info,
-        "existe_en_sheets": short_id in master if master else False,
-        "primeros_ids_sheets": list(master.keys())[:10] if master else []
-    })
-
-# =====================================================
-# EXPORTAR Y CIERRE DE MES
-# =====================================================
 
 @app.route("/api/export_reviews", methods=["GET"])
 @login_required
