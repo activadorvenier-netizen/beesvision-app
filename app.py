@@ -133,9 +133,10 @@ def load_client_master():
 
 def extract_short_poc_id(poc_id):
     """
-    Extraer el código de cliente del POC ID completo (14 dígitos).
-    Funciona para TODOS los casos: 2, 3, 4, 5 o 6 dígitos.
-    Prefijo fijo: 053822 (6 dígitos)
+    Extraer el código de cliente del POC ID completo.
+    Maneja ambos formatos:
+    - Con 0 inicial: 05382200001875 -> 1875
+    - Sin 0 inicial: 5382200001875 -> 1875
     """
     if not poc_id:
         return ""
@@ -147,14 +148,23 @@ def extract_short_poc_id(poc_id):
     
     poc_id = poc_id.replace('-', '').replace(' ', '')
     
-    PREFIX = "053822"
+    # Prefijos posibles
+    PREFIX_CON_CERO = "053822"    # 6 dígitos con cero
+    PREFIX_SIN_CERO = "53822"     # 5 dígitos sin cero
     
-    if poc_id.startswith(PREFIX):
-        resultado = poc_id[len(PREFIX):]
-        resultado = resultado.lstrip('0')
-        return resultado if resultado else "0"
+    resultado = poc_id
     
-    return poc_id.lstrip('0') or "0"
+    # Si empieza con el prefijo CON cero (053822)
+    if poc_id.startswith(PREFIX_CON_CERO):
+        resultado = poc_id[len(PREFIX_CON_CERO):]
+    # Si empieza con el prefijo SIN cero (53822)
+    elif poc_id.startswith(PREFIX_SIN_CERO):
+        resultado = poc_id[len(PREFIX_SIN_CERO):]
+    
+    # Eliminar ceros a la izquierda
+    resultado = resultado.lstrip('0')
+    
+    return resultado if resultado else "0"
 
 def get_client_info(poc_id):
     """
