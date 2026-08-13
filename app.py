@@ -171,29 +171,23 @@ def extract_short_poc_id(poc_id):
 def get_client_info(poc_id):
     """
     Obtener información de un cliente por POC ID.
-    1. Extrae el código corto del POC ID (ej: 05382200001875 -> 1875)
-    2. Busca ese código en Google Sheets
-    3. Si no encuentra, busca en CLIENTES_LOCALES
     """
     if not poc_id:
         return None
     
-    # Extraer el código corto del cliente
     short_id = extract_short_poc_id(poc_id)
     if not short_id or short_id == "0":
         return None
     
-    print(f"🔍 Buscando cliente: {short_id} (POC ID: {poc_id})")
-    
-    # BUSCAR EN GOOGLE SHEETS
+    # === BUSCAR EN SHEETS (siempre recargar) ===
     master = load_client_master()
     if master and short_id in master:
-        print(f"✅ Cliente encontrado en SHEETS: {short_id} -> {master[short_id]['nombre']}")
+        print(f"✅ Cliente SHEETS: {short_id} -> {master[short_id]['nombre']}")
         return master[short_id]
     
-    # BUSCAR EN CLIENTES LOCALES (RESPALDO)
+    # === BUSCAR EN LOCALES (respaldo) ===
     if short_id in CLIENTES_LOCALES:
-        print(f"✅ Cliente encontrado en LOCAL: {short_id} -> {CLIENTES_LOCALES[short_id]['nombre']}")
+        print(f"✅ Cliente LOCAL: {short_id} -> {CLIENTES_LOCALES[short_id]['nombre']}")
         return CLIENTES_LOCALES[short_id]
     
     print(f"⚠️ Cliente NO ENCONTRADO: {short_id}")
@@ -370,7 +364,7 @@ def api_has_file():
 @app.route("/api/upload", methods=["POST"])
 @login_required
 def api_upload():
-    global _cached_df, _data_loaded, _current_mes
+    global _cached_df, _data_loaded, _current_mes, _client_cache, _client_cache_time
     
     if "file" not in request.files:
         return jsonify({"error": "No se envió archivo"}), 400
@@ -387,6 +381,12 @@ def api_upload():
         _data_loaded = True
         _current_mes = get_mes_actual()
         
+        # === FORZAR RECARGA DE CLIENTES DESDE SHEETS ===
+        _client_cache = {}
+        _client_cache_time = 0
+        load_client_master()
+        # =============================================
+        
         return jsonify({
             "ok": True,
             "rows": len(_cached_df),
@@ -402,7 +402,13 @@ def api_upload():
 @login_required
 def api_tasks():
     """Obtener tareas filtradas con estado de revisión"""
-    global _cached_df, _data_loaded
+    global _cached_df, _data_loaded, _client_cache, _client_cache_time
+    
+    # === FORZAR RECARGA DE CLIENTES DESDE SHEETS ===
+    _client_cache = {}
+    _client_cache_time = 0
+    master = load_client_master()  # Esto recarga desde Sheets
+    # =============================================
     
     if not _data_loaded or _cached_df is None or _cached_df.empty:
         file_path = UPLOAD_DIR / "data.xlsx"
@@ -455,8 +461,17 @@ def api_tasks():
         # Extraer el código corto del cliente
         short_poc_id = extract_short_poc_id(raw_poc_id)
         
-        # Buscar información del cliente usando el código corto
-        client_info = get_client_info(raw_poc_id)
+        # === BUSCAR EN SHEETS (ya cargado en master) ===
+        client_info = None
+        if master and short_poc_id in master:
+            client_info = master[short_poc_id]
+            print(f"✅ Cliente encontrado en SHEETS: {short_poc_id} -> {client_info['nombre']}")
+        
+        # Si no está en Sheets, buscar en locales
+        if not client_info and short_poc_id in CLIENTES_LOCALES:
+            client_info = CLIENTES_LOCALES[short_poc_id]
+            print(f"✅ Cliente encontrado en LOCAL: {short_poc_id} -> {client_info['nombre']}")
+        # =============================================
         
         img_url = clean_text(row.get("Img", ""))
         if not img_url:
