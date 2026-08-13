@@ -564,8 +564,6 @@ def api_export_reviews():
 
 @app.route("/api/close_month", methods=["POST"])
 @login_required
-@app.route("/api/close_month", methods=["POST"])
-@login_required
 def api_close_month():
     global _cached_df, _data_loaded
     
