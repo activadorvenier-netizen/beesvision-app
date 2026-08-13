@@ -479,13 +479,13 @@ def api_export_reviews():
             for review in reviews:
                 export_data.append({
                     "Fecha": "",
-                    "Promotor": "",
                     "Cliente ID": "",
                     "Razón Social": "",
                     "Direccion": "",
                     "Tarea": "",
                     "Status": review["status"],
-                    "Observaciones": review.get("observaciones", ""),
+                    "Observación": review.get("observaciones", ""),
+                    "Imagen": "",
                     "Supervisor": review["supervisor_name"],
                     "Fecha Revisión": review["fecha_revision"]
                 })
@@ -503,7 +503,7 @@ def api_export_reviews():
                 task_data[row["task_id"]] = {
                     "fecha": formatear_fecha(row.get("Fecha")),
                     "promotor": row.get("Promotor", ""),
-                    "cliente_id": short_poc_id,
+                    "poc_id_completo": raw_poc_id,  # Código de 14 dígitos
                     "razon_social": client_info.get("nombre") if client_info else "",
                     "direccion": client_info.get("direccion") if client_info else "",
                     "detalle_tarea": row.get("Detalle Tarea", ""),
@@ -517,13 +517,13 @@ def api_export_reviews():
                 
                 export_data.append({
                     "Fecha": task_info.get("fecha", ""),
-                    "Promotor": task_info.get("promotor", ""),
-                    "Cliente ID": task_info.get("cliente_id", ""),
+                    "Cliente ID": task_info.get("poc_id_completo", ""),  # Código de 14 dígitos
                     "Razón Social": task_info.get("razon_social", ""),
                     "Direccion": task_info.get("direccion", ""),
                     "Tarea": task_info.get("detalle_tarea", ""),
                     "Status": review["status"],
-                    "Observaciones": review.get("observaciones", ""),
+                    "Observación": review.get("observaciones", ""),
+                    "Imagen": task_info.get("imagen", ""),
                     "Supervisor": review["supervisor_name"],
                     "Fecha Revisión": review["fecha_revision"]
                 })
@@ -564,6 +564,8 @@ def api_export_reviews():
 
 @app.route("/api/close_month", methods=["POST"])
 @login_required
+@app.route("/api/close_month", methods=["POST"])
+@login_required
 def api_close_month():
     global _cached_df, _data_loaded
     
@@ -582,13 +584,13 @@ def api_close_month():
             for review in reviews:
                 export_data.append({
                     "Fecha": "",
-                    "Promotor": "",
                     "Cliente ID": "",
                     "Razón Social": "",
                     "Direccion": "",
                     "Tarea": "",
                     "Status": review["status"],
-                    "Observaciones": review.get("observaciones", ""),
+                    "Observación": review.get("observaciones", ""),
+                    "Imagen": "",
                     "Supervisor": review["supervisor_name"],
                     "Fecha Revisión": review["fecha_revision"]
                 })
@@ -606,7 +608,7 @@ def api_close_month():
                 task_data[row["task_id"]] = {
                     "fecha": formatear_fecha(row.get("Fecha")),
                     "promotor": row.get("Promotor", ""),
-                    "cliente_id": short_poc_id,
+                    "poc_id_completo": raw_poc_id,
                     "razon_social": client_info.get("nombre") if client_info else "",
                     "direccion": client_info.get("direccion") if client_info else "",
                     "detalle_tarea": row.get("Detalle Tarea", ""),
@@ -620,13 +622,13 @@ def api_close_month():
                 
                 export_data.append({
                     "Fecha": task_info.get("fecha", ""),
-                    "Promotor": task_info.get("promotor", ""),
-                    "Cliente ID": task_info.get("cliente_id", ""),
+                    "Cliente ID": task_info.get("poc_id_completo", ""),
                     "Razón Social": task_info.get("razon_social", ""),
                     "Direccion": task_info.get("direccion", ""),
                     "Tarea": task_info.get("detalle_tarea", ""),
                     "Status": review["status"],
-                    "Observaciones": review.get("observaciones", ""),
+                    "Observación": review.get("observaciones", ""),
+                    "Imagen": task_info.get("imagen", ""),
                     "Supervisor": review["supervisor_name"],
                     "Fecha Revisión": review["fecha_revision"]
                 })
