@@ -275,6 +275,7 @@ def formatear_fecha(fecha_valor):
 def _load_data(path: Path) -> pd.DataFrame:
     global _current_excel, _data_loaded, _current_mes
     
+    print(f"📂 Cargando archivo: {path.name}")
     df = pd.read_excel(path, engine="openpyxl")
     _current_excel = path.name
     _current_mes = get_mes_actual()
@@ -282,6 +283,41 @@ def _load_data(path: Path) -> pd.DataFrame:
     # Renombrar TaskImageUrl a Img si existe
     if "TaskImageUrl" in df.columns and "Img" not in df.columns:
         df = df.rename(columns={"TaskImageUrl": "Img"})
+    
+    # =====================================================
+    # NUEVO: AGREGAR DATOS DEL CLIENTE AUTOMÁTICAMENTE
+    # =====================================================
+    
+    # Verificar si existe la columna POC ID
+    if "POC ID" in df.columns:
+        print("🔍 Procesando POC IDs para agregar datos de clientes...")
+        
+        # Cargar clientes desde Sheets
+        master = load_client_master()
+        
+        # Crear listas para las nuevas columnas
+        razon_social = []
+        localidad = []
+        
+        # Procesar cada fila
+        for _, row in df.iterrows():
+            poc_id = clean_text(row.get("POC ID", ""))
+            short_id = extract_short_poc_id(poc_id)
+            
+            if master and short_id and short_id in master:
+                razon_social.append(master[short_id]["nombre"])
+                localidad.append(master[short_id]["direccion"])
+            else:
+                razon_social.append("")
+                localidad.append("")
+        
+        # Agregar las columnas al DataFrame
+        df["RazonSocial"] = razon_social
+        df["Localidad"] = localidad
+        
+        print(f"✅ Columnas 'RazonSocial' y 'Localidad' agregadas")
+    
+    # =====================================================
     
     required = ["Fecha", "Promotor", "POC ID", "Detalle Tarea", "Img", "Completada", "Validada", "Visita Valida", "Supervisor ID"]
     
@@ -399,7 +435,6 @@ def api_upload():
 @app.route("/api/tasks")
 @login_required
 def api_tasks():
-    """Obtener tareas filtradas con estado de revisión"""
     global _cached_df, _data_loaded
     
     if not _data_loaded or _cached_df is None or _cached_df.empty:
@@ -449,16 +484,18 @@ def api_tasks():
             review = db.get_review_status(task_id, supervisor_id)
         
         raw_poc_id = clean_text(row.get("POC ID"))
-        
-        # Extraer el código corto del cliente
         short_poc_id = extract_short_poc_id(raw_poc_id)
-        
-        # Buscar información del cliente usando el código corto
-        client_info = get_client_info(raw_poc_id)
         
         img_url = clean_text(row.get("Img", ""))
         if not img_url:
             img_url = clean_text(row.get("TaskImageUrl", ""))
+        
+        # =====================================================
+        # USAR LOS DATOS DEL CLIENTE QUE YA AGREGAMOS
+        # =====================================================
+        razon_social = clean_text(row.get("RazonSocial", ""))
+        localidad = clean_text(row.get("Localidad", ""))
+        # =====================================================
         
         response_rows.append({
             "row_id": int(row["row_id"]),
@@ -468,8 +505,8 @@ def api_tasks():
             "poc_id": short_poc_id,
             "poc_id_completo": raw_poc_id,
             "cliente_id": short_poc_id,
-            "razon_social": client_info.get("nombre") if client_info else "SIN DATO",
-            "direccion": client_info.get("direccion") if client_info else "SIN DATO",
+            "razon_social": razon_social if razon_social else "SIN DATO",
+            "direccion": localidad if localidad else "SIN DATO",
             "detalle_tarea": clean_text(row.get("Detalle Tarea")),
             "imagen": img_url,
             "revisado": is_reviewed,
