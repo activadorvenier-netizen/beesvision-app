@@ -278,7 +278,6 @@ def api_upload():
 @login_required
 def api_tasks():
     global _cached_df, _data_loaded
-    
     if not _data_loaded or _cached_df is None or _cached_df.empty:
         file_path = UPLOAD_DIR / "data.xlsx"
         if file_path.exists():
@@ -289,16 +288,19 @@ def api_tasks():
                 return jsonify({"error": f"Error cargando datos: {str(e)}", "no_data": True}), 404
         else:
             return jsonify({"error": "No hay datos cargados", "no_data": True}), 404
-    
     supervisor_id = session['supervisor_id']
     start_date = request.args.get("start_date", type=str)
     end_date = request.args.get("end_date", type=str)
-    
     result = _cached_df[_cached_df["Supervisor ID"] == supervisor_id].copy()
+    
+    # =====================================================
+    # ORDENAR POR FECHA (más antiguas primero)
+    # =====================================================
+    result = result.sort_values(by="Fecha", ascending=True)
+    # =====================================================
     
     if result.empty:
         return jsonify({"error": f"No hay tareas asignadas para {SUPERVISORS[supervisor_id]}", "no_tasks": True}), 404
-    
     if start_date:
         try:
             result = result[result["Fecha"].astype(str) >= start_date]
@@ -309,31 +311,23 @@ def api_tasks():
             result = result[result["Fecha"].astype(str) <= end_date]
         except:
             pass
-    
     if result.empty:
         return jsonify({"error": "No hay tareas en el rango de fechas", "no_tasks": True}), 404
-    
     task_ids = result["task_id"].tolist()
     pending_tasks = db.get_pending_tasks(supervisor_id, task_ids)
-    
     response_rows = []
     for _, row in result.iterrows():
         task_id = row["task_id"]
         is_reviewed = task_id not in pending_tasks
-        
         review = None
         if is_reviewed:
             review = db.get_review_status(task_id, supervisor_id)
-        
         raw_poc_id = clean_text(row.get("POC ID"))
         short_poc_id = extract_short_poc_id(raw_poc_id)
-        
         client_info = get_client_info(raw_poc_id)
-        
         img_url = clean_text(row.get("Img", ""))
         if not img_url:
             img_url = clean_text(row.get("TaskImageUrl", ""))
-        
         response_rows.append({
             "row_id": int(row["row_id"]),
             "task_id": task_id,
@@ -351,7 +345,6 @@ def api_tasks():
             "observaciones": review.get("observaciones") if review else "",
             "fecha_revision": review.get("fecha_revision") if review else None
         })
-    
     return jsonify(response_rows)
 
 # =====================================================
