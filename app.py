@@ -471,36 +471,35 @@ def api_export_reviews():
             export_data = []
             for review in reviews:
                 export_data.append({
-                    "Fecha": "",
-                    "Cliente ID": "",
+                    "Fecha Revisión": review.get("fecha_revision", ""),
+                    "Fecha Tarea": "",
+                    "POC ID": "",
+                    "Detalle Tarea": "",
+                    "URL Imagen": "",
                     "Razón Social": "",
                     "Direccion": "",
-                    "Tarea": "",
+                    "Promotor": "",
                     "Status": review["status"],
-                    "Observación": review.get("observaciones", ""),
-                    "Imagen": "",
-                    "Supervisor": review["supervisor_name"],
-                    "Fecha Revisión": review["fecha_revision"]
+                    "Observaciones": review.get("observaciones", "")
                 })
             df_export = pd.DataFrame(export_data)
         else:
             task_data = {}
             for _, row in _cached_df.iterrows():
                 raw_poc_id = clean_text(row.get("POC ID", ""))
-                short_poc_id = extract_short_poc_id(raw_poc_id)
                 client_info = get_client_info(raw_poc_id) if raw_poc_id else None
                 img_url = clean_text(row.get("Img", ""))
                 if not img_url:
                     img_url = clean_text(row.get("TaskImageUrl", ""))
                 
                 task_data[row["task_id"]] = {
-                    "fecha": formatear_fecha(row.get("Fecha")),
-                    "promotor": row.get("Promotor", ""),
-                    "poc_id_completo": raw_poc_id,  # Código de 14 dígitos
+                    "fecha_tarea": formatear_fecha(row.get("Fecha")),
+                    "poc_id_completo": raw_poc_id,
+                    "detalle_tarea": row.get("Detalle Tarea", ""),
+                    "imagen": img_url,
                     "razon_social": client_info.get("nombre") if client_info else "",
                     "direccion": client_info.get("direccion") if client_info else "",
-                    "detalle_tarea": row.get("Detalle Tarea", ""),
-                    "imagen": img_url
+                    "promotor": row.get("Promotor", "")
                 }
             
             export_data = []
@@ -509,16 +508,16 @@ def api_export_reviews():
                 task_info = task_data.get(task_id, {})
                 
                 export_data.append({
-                    "Fecha": task_info.get("fecha", ""),
-                    "Cliente ID": task_info.get("poc_id_completo", ""),  # Código de 14 dígitos
+                    "Fecha Revisión": review.get("fecha_revision", ""),
+                    "Fecha Tarea": task_info.get("fecha_tarea", ""),
+                    "POC ID": task_info.get("poc_id_completo", ""),
+                    "Detalle Tarea": task_info.get("detalle_tarea", ""),
+                    "URL Imagen": task_info.get("imagen", ""),
                     "Razón Social": task_info.get("razon_social", ""),
                     "Direccion": task_info.get("direccion", ""),
-                    "Tarea": task_info.get("detalle_tarea", ""),
+                    "Promotor": task_info.get("promotor", ""),
                     "Status": review["status"],
-                    "Observación": review.get("observaciones", ""),
-                    "Imagen": task_info.get("imagen", ""),
-                    "Supervisor": review["supervisor_name"],
-                    "Fecha Revisión": review["fecha_revision"]
+                    "Observaciones": review.get("observaciones", "")
                 })
             df_export = pd.DataFrame(export_data)
         
@@ -527,19 +526,32 @@ def api_export_reviews():
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
             df_export.to_excel(writer, sheet_name='Revisiones', index=False)
             
-            for sheet_name in writer.sheets:
-                worksheet = writer.sheets[sheet_name]
-                for column in worksheet.columns:
-                    max_length = 0
-                    column_letter = column[0].column_letter
-                    for cell in column:
-                        try:
-                            if len(str(cell.value)) > max_length:
-                                max_length = len(str(cell.value))
-                        except:
-                            pass
-                    adjusted_width = min(max_length + 2, 50)
-                    worksheet.column_dimensions[column_letter].width = adjusted_width
+            # Obtener la hoja para aplicar formatos
+            worksheet = writer.sheets['Revisiones']
+            
+            # === COLOR AZUL CLARO PARA LAS PRIMERAS 5 COLUMNAS ===
+            from openpyxl.styles import PatternFill
+            
+            # Columnas A a E (índices 0 a 4)
+            azul_claro = PatternFill(start_color="D4E6F1", end_color="D4E6F1", fill_type="solid")
+            
+            for col_idx in range(0, 5):  # A, B, C, D, E
+                for row in range(1, len(df_export) + 2):  # Desde fila 1 (encabezado)
+                    cell = worksheet.cell(row=row, column=col_idx + 1)
+                    cell.fill = azul_claro
+            
+            # Ajustar ancho de columnas
+            for column in worksheet.columns:
+                max_length = 0
+                column_letter = column[0].column_letter
+                for cell in column:
+                    try:
+                        if len(str(cell.value)) > max_length:
+                            max_length = len(str(cell.value))
+                    except:
+                        pass
+                adjusted_width = min(max_length + 2, 50)
+                worksheet.column_dimensions[column_letter].width = adjusted_width
         
         output.seek(0)
         filename = f"reporte_revisiones_{supervisor_name}_{mes}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
@@ -574,36 +586,35 @@ def api_close_month():
             export_data = []
             for review in reviews:
                 export_data.append({
-                    "Fecha": "",
-                    "Cliente ID": "",
+                    "Fecha Revisión": review.get("fecha_revision", ""),
+                    "Fecha Tarea": "",
+                    "POC ID": "",
+                    "Detalle Tarea": "",
+                    "URL Imagen": "",
                     "Razón Social": "",
                     "Direccion": "",
-                    "Tarea": "",
+                    "Promotor": "",
                     "Status": review["status"],
-                    "Observación": review.get("observaciones", ""),
-                    "Imagen": "",
-                    "Supervisor": review["supervisor_name"],
-                    "Fecha Revisión": review["fecha_revision"]
+                    "Observaciones": review.get("observaciones", "")
                 })
             df_export = pd.DataFrame(export_data)
         else:
             task_data = {}
             for _, row in _cached_df.iterrows():
                 raw_poc_id = clean_text(row.get("POC ID", ""))
-                short_poc_id = extract_short_poc_id(raw_poc_id)
                 client_info = get_client_info(raw_poc_id) if raw_poc_id else None
                 img_url = clean_text(row.get("Img", ""))
                 if not img_url:
                     img_url = clean_text(row.get("TaskImageUrl", ""))
                 
                 task_data[row["task_id"]] = {
-                    "fecha": formatear_fecha(row.get("Fecha")),
-                    "promotor": row.get("Promotor", ""),
+                    "fecha_tarea": formatear_fecha(row.get("Fecha")),
                     "poc_id_completo": raw_poc_id,
+                    "detalle_tarea": row.get("Detalle Tarea", ""),
+                    "imagen": img_url,
                     "razon_social": client_info.get("nombre") if client_info else "",
                     "direccion": client_info.get("direccion") if client_info else "",
-                    "detalle_tarea": row.get("Detalle Tarea", ""),
-                    "imagen": img_url
+                    "promotor": row.get("Promotor", "")
                 }
             
             export_data = []
@@ -612,16 +623,16 @@ def api_close_month():
                 task_info = task_data.get(task_id, {})
                 
                 export_data.append({
-                    "Fecha": task_info.get("fecha", ""),
-                    "Cliente ID": task_info.get("poc_id_completo", ""),
+                    "Fecha Revisión": review.get("fecha_revision", ""),
+                    "Fecha Tarea": task_info.get("fecha_tarea", ""),
+                    "POC ID": task_info.get("poc_id_completo", ""),
+                    "Detalle Tarea": task_info.get("detalle_tarea", ""),
+                    "URL Imagen": task_info.get("imagen", ""),
                     "Razón Social": task_info.get("razon_social", ""),
                     "Direccion": task_info.get("direccion", ""),
-                    "Tarea": task_info.get("detalle_tarea", ""),
+                    "Promotor": task_info.get("promotor", ""),
                     "Status": review["status"],
-                    "Observación": review.get("observaciones", ""),
-                    "Imagen": task_info.get("imagen", ""),
-                    "Supervisor": review["supervisor_name"],
-                    "Fecha Revisión": review["fecha_revision"]
+                    "Observaciones": review.get("observaciones", "")
                 })
             df_export = pd.DataFrame(export_data)
         
@@ -630,19 +641,31 @@ def api_close_month():
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
             df_export.to_excel(writer, sheet_name='Revisiones Cierre', index=False)
             
-            for sheet_name in writer.sheets:
-                worksheet = writer.sheets[sheet_name]
-                for column in worksheet.columns:
-                    max_length = 0
-                    column_letter = column[0].column_letter
-                    for cell in column:
-                        try:
-                            if len(str(cell.value)) > max_length:
-                                max_length = len(str(cell.value))
-                        except:
-                            pass
-                    adjusted_width = min(max_length + 2, 50)
-                    worksheet.column_dimensions[column_letter].width = adjusted_width
+            # Obtener la hoja para aplicar formatos
+            worksheet = writer.sheets['Revisiones Cierre']
+            
+            # === COLOR AZUL CLARO PARA LAS PRIMERAS 5 COLUMNAS ===
+            from openpyxl.styles import PatternFill
+            
+            azul_claro = PatternFill(start_color="D4E6F1", end_color="D4E6F1", fill_type="solid")
+            
+            for col_idx in range(0, 5):  # A, B, C, D, E
+                for row in range(1, len(df_export) + 2):
+                    cell = worksheet.cell(row=row, column=col_idx + 1)
+                    cell.fill = azul_claro
+            
+            # Ajustar ancho de columnas
+            for column in worksheet.columns:
+                max_length = 0
+                column_letter = column[0].column_letter
+                for cell in column:
+                    try:
+                        if len(str(cell.value)) > max_length:
+                            max_length = len(str(cell.value))
+                    except:
+                        pass
+                adjusted_width = min(max_length + 2, 50)
+                worksheet.column_dimensions[column_letter].width = adjusted_width
         
         output.seek(0)
         filename = f"cierre_mes_{supervisor_name}_{mes}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
