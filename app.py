@@ -151,6 +151,14 @@ def formatear_fecha(fecha_valor):
     
     return fecha_str
 
+def formatear_fecha_revision(fecha_revision):
+    """Formatear fecha de revisión a DD/MM/YYYY"""
+    if not fecha_revision:
+        return ""
+    if ' ' in fecha_revision:
+        return fecha_revision.split(' ')[0]
+    return fecha_revision
+
 def _load_data(path: Path) -> pd.DataFrame:
     global _current_excel, _data_loaded, _current_mes
     
@@ -471,11 +479,12 @@ def api_export_reviews():
             export_data = []
             for review in reviews:
                 export_data.append({
-                    "Fecha Revisión": review.get("fecha_revision", ""),
+                    "Fecha Revisión": formatear_fecha_revision(review.get("fecha_revision", "")),
                     "Fecha Tarea": "",
                     "POC ID": "",
                     "Detalle Tarea": "",
                     "URL Imagen": "",
+                    "ID Tarea": "",
                     "Razón Social": "",
                     "Direccion": "",
                     "Promotor": "",
@@ -497,6 +506,7 @@ def api_export_reviews():
                     "poc_id_completo": raw_poc_id,
                     "detalle_tarea": row.get("Detalle Tarea", ""),
                     "imagen": img_url,
+                    "id_tarea": row.get("ID Tarea", ""),  # Campo ID Tarea del Excel
                     "razon_social": client_info.get("nombre") if client_info else "",
                     "direccion": client_info.get("direccion") if client_info else "",
                     "promotor": row.get("Promotor", "")
@@ -508,11 +518,12 @@ def api_export_reviews():
                 task_info = task_data.get(task_id, {})
                 
                 export_data.append({
-                    "Fecha Revisión": review.get("fecha_revision", ""),
+                    "Fecha Revisión": formatear_fecha_revision(review.get("fecha_revision", "")),
                     "Fecha Tarea": task_info.get("fecha_tarea", ""),
                     "POC ID": task_info.get("poc_id_completo", ""),
                     "Detalle Tarea": task_info.get("detalle_tarea", ""),
                     "URL Imagen": task_info.get("imagen", ""),
+                    "ID Tarea": task_info.get("id_tarea", ""),
                     "Razón Social": task_info.get("razon_social", ""),
                     "Direccion": task_info.get("direccion", ""),
                     "Promotor": task_info.get("promotor", ""),
@@ -526,17 +537,15 @@ def api_export_reviews():
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
             df_export.to_excel(writer, sheet_name='Revisiones', index=False)
             
-            # Obtener la hoja para aplicar formatos
             worksheet = writer.sheets['Revisiones']
             
-            # === COLOR AZUL CLARO PARA LAS PRIMERAS 5 COLUMNAS ===
             from openpyxl.styles import PatternFill
             
-            # Columnas A a E (índices 0 a 4)
+            # === COLOR AZUL CLARO PARA LAS PRIMERAS 6 COLUMNAS (A a F) ===
             azul_claro = PatternFill(start_color="D4E6F1", end_color="D4E6F1", fill_type="solid")
             
-            for col_idx in range(0, 5):  # A, B, C, D, E
-                for row in range(1, len(df_export) + 2):  # Desde fila 1 (encabezado)
+            for col_idx in range(0, 6):  # A, B, C, D, E, F
+                for row in range(1, len(df_export) + 2):
                     cell = worksheet.cell(row=row, column=col_idx + 1)
                     cell.fill = azul_claro
             
@@ -586,11 +595,12 @@ def api_close_month():
             export_data = []
             for review in reviews:
                 export_data.append({
-                    "Fecha Revisión": review.get("fecha_revision", ""),
+                    "Fecha Revisión": formatear_fecha_revision(review.get("fecha_revision", "")),
                     "Fecha Tarea": "",
                     "POC ID": "",
                     "Detalle Tarea": "",
                     "URL Imagen": "",
+                    "ID Tarea": "",
                     "Razón Social": "",
                     "Direccion": "",
                     "Promotor": "",
@@ -612,6 +622,7 @@ def api_close_month():
                     "poc_id_completo": raw_poc_id,
                     "detalle_tarea": row.get("Detalle Tarea", ""),
                     "imagen": img_url,
+                    "id_tarea": row.get("ID Tarea", ""),
                     "razon_social": client_info.get("nombre") if client_info else "",
                     "direccion": client_info.get("direccion") if client_info else "",
                     "promotor": row.get("Promotor", "")
@@ -623,11 +634,12 @@ def api_close_month():
                 task_info = task_data.get(task_id, {})
                 
                 export_data.append({
-                    "Fecha Revisión": review.get("fecha_revision", ""),
+                    "Fecha Revisión": formatear_fecha_revision(review.get("fecha_revision", "")),
                     "Fecha Tarea": task_info.get("fecha_tarea", ""),
                     "POC ID": task_info.get("poc_id_completo", ""),
                     "Detalle Tarea": task_info.get("detalle_tarea", ""),
                     "URL Imagen": task_info.get("imagen", ""),
+                    "ID Tarea": task_info.get("id_tarea", ""),
                     "Razón Social": task_info.get("razon_social", ""),
                     "Direccion": task_info.get("direccion", ""),
                     "Promotor": task_info.get("promotor", ""),
@@ -641,15 +653,14 @@ def api_close_month():
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
             df_export.to_excel(writer, sheet_name='Revisiones Cierre', index=False)
             
-            # Obtener la hoja para aplicar formatos
             worksheet = writer.sheets['Revisiones Cierre']
             
-            # === COLOR AZUL CLARO PARA LAS PRIMERAS 5 COLUMNAS ===
             from openpyxl.styles import PatternFill
             
+            # === COLOR AZUL CLARO PARA LAS PRIMERAS 6 COLUMNAS (A a F) ===
             azul_claro = PatternFill(start_color="D4E6F1", end_color="D4E6F1", fill_type="solid")
             
-            for col_idx in range(0, 5):  # A, B, C, D, E
+            for col_idx in range(0, 6):  # A, B, C, D, E, F
                 for row in range(1, len(df_export) + 2):
                     cell = worksheet.cell(row=row, column=col_idx + 1)
                     cell.fill = azul_claro
