@@ -1287,21 +1287,19 @@
             }
         }
         
-        function openModal(imageUrl, promotor, clienteId, razonSocial, localidad) {
+        function openModal(imageUrl, promotor, clienteId, razonSocial, direccion) {
             if (!imageUrl) {
                 showToast('No hay imagen para ampliar', 'error');
                 return;
             }
+            
             const modal = document.getElementById('imageModal');
             const modalImg = document.getElementById('modalImage');
             const modalInfo = document.getElementById('modalInfo');
+            
             modalImg.src = imageUrl;
-            let infoParts = [];
-            if (promotor) infoParts.push(`👤 ${promotor}`);
-            if (clienteId) infoParts.push(`🔑 ${clienteId}`);
-            if (razonSocial) infoParts.push(`🏢 ${razonSocial}`);
-            if (localidad) infoParts.push(`📍 ${localidad}`);
-            modalInfo.textContent = infoParts.join(' | ') || 'Sin información';
+            modalInfo.textContent = '';  // Vacío, sin información
+            
             modal.classList.add('active');
             document.body.style.overflow = 'hidden';
         }
