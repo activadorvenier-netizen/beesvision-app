@@ -310,17 +310,33 @@ def api_tasks():
     if result.empty:
         return jsonify({"error": f"No hay tareas asignadas para {SUPERVISORS[supervisor_id]}", "no_tasks": True}), 404
     
-    # === FILTROS DE FECHA ===
-    if start_date:
+    # =====================================================
+    # FILTROS DE FECHA CORREGIDOS (usando datetime)
+    # =====================================================
+    if start_date or end_date:
+        # Crear columna de fecha como datetime para comparar
         try:
-            result = result[result["Fecha"].astype(str) >= start_date]
+            # Convertir la fecha del Excel a datetime
+            result['fecha_dt'] = pd.to_datetime(result['Fecha'], format='%d/%m/%Y', errors='coerce')
+            
+            if start_date:
+                start_dt = datetime.strptime(start_date, "%d/%m/%Y")
+                result = result[result['fecha_dt'] >= start_dt]
+            
+            if end_date:
+                end_dt = datetime.strptime(end_date, "%d/%m/%Y")
+                result = result[result['fecha_dt'] <= end_dt]
+            
+            # Eliminar columna temporal
+            result = result.drop(columns=['fecha_dt'])
         except Exception as e:
-            print(f"Error filtrando fecha desde: {e}")
-    if end_date:
-        try:
-            result = result[result["Fecha"].astype(str) <= end_date]
-        except Exception as e:
-            print(f"Error filtrando fecha hasta: {e}")
+            print(f"Error en filtros de fecha: {e}")
+            # Si falla, intentar comparar como string
+            if start_date:
+                result = result[result["Fecha"].astype(str) >= start_date]
+            if end_date:
+                result = result[result["Fecha"].astype(str) <= end_date]
+    # =====================================================
     
     if result.empty:
         return jsonify({"error": "No hay tareas en el rango de fechas", "no_tasks": True}), 404
