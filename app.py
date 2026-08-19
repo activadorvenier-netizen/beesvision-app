@@ -197,6 +197,11 @@ def _load_data(path: Path) -> pd.DataFrame:
     filtered["row_id"] = range(1, len(filtered) + 1)
     filtered["task_id"] = filtered.apply(_build_task_id, axis=1)
     
+    # === LOG: Mostrar primeros task_id generados ===
+    print(f"📊 Task IDs generados: {filtered['task_id'].head().tolist()}")
+    print(f"📊 Total tareas: {len(filtered)}")
+    # ============================================
+    
     _data_loaded = True
     
     return filtered
@@ -204,6 +209,19 @@ def _load_data(path: Path) -> pd.DataFrame:
 # =====================================================
 # ROUTES
 # =====================================================
+
+@app.route("/api/verificar_revisiones")
+@login_required
+def verificar_revisiones():
+    """Ver todas las revisiones guardadas"""
+    supervisor_id = session.get('supervisor_id')
+    mes = _current_mes or get_mes_actual()
+    reviews = db.get_all_reviews(supervisor_id, mes)
+    
+    return jsonify({
+        "total": len(reviews),
+        "revisiones": reviews[:10]  # Mostrar las primeras 10
+    })
 
 @app.route("/")
 def index():
