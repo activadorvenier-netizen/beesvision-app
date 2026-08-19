@@ -113,11 +113,12 @@ def login_required(f):
     return decorated_function
 
 def _build_task_id(row: pd.Series) -> str:
-    img_value = clean_text(row.get("Img", ""))
+    """Crear ID único para cada tarea usando POC ID + Fecha + Detalle Tarea"""
     poc_id = clean_text(row.get("POC ID", ""))
     fecha = str(row.get("Fecha", ""))
-    parts = [img_value, poc_id, fecha]
-    raw = "|".join(parts)
+    detalle = clean_text(row.get("Detalle Tarea", ""))
+    # Usar POC ID + Fecha + Detalle Tarea
+    raw = f"{poc_id}|{fecha}|{detalle}"
     return hashlib.md5(raw.encode()).hexdigest()[:12]
 
 def get_mes_actual():
@@ -296,33 +297,37 @@ def api_tasks():
                 return jsonify({"error": f"Error cargando datos: {str(e)}", "no_data": True}), 404
         else:
             return jsonify({"error": "No hay datos cargados", "no_data": True}), 404
+    
     supervisor_id = session['supervisor_id']
     start_date = request.args.get("start_date", type=str)
     end_date = request.args.get("end_date", type=str)
+    
     result = _cached_df[_cached_df["Supervisor ID"] == supervisor_id].copy()
     
-    # =====================================================
-    # ORDENAR POR FECHA (más antiguas primero)
-    # =====================================================
+    # Ordenar por fecha (más antiguas primero)
     result = result.sort_values(by="Fecha", ascending=True)
-    # =====================================================
     
     if result.empty:
         return jsonify({"error": f"No hay tareas asignadas para {SUPERVISORS[supervisor_id]}", "no_tasks": True}), 404
+    
+    # === FILTROS DE FECHA ===
     if start_date:
         try:
             result = result[result["Fecha"].astype(str) >= start_date]
-        except:
-            pass
+        except Exception as e:
+            print(f"Error filtrando fecha desde: {e}")
     if end_date:
         try:
             result = result[result["Fecha"].astype(str) <= end_date]
-        except:
-            pass
+        except Exception as e:
+            print(f"Error filtrando fecha hasta: {e}")
+    
     if result.empty:
         return jsonify({"error": "No hay tareas en el rango de fechas", "no_tasks": True}), 404
+    
     task_ids = result["task_id"].tolist()
     pending_tasks = db.get_pending_tasks(supervisor_id, task_ids)
+    
     response_rows = []
     for _, row in result.iterrows():
         task_id = row["task_id"]
@@ -330,12 +335,15 @@ def api_tasks():
         review = None
         if is_reviewed:
             review = db.get_review_status(task_id, supervisor_id)
+        
         raw_poc_id = clean_text(row.get("POC ID"))
         short_poc_id = extract_short_poc_id(raw_poc_id)
         client_info = get_client_info(raw_poc_id)
+        
         img_url = clean_text(row.get("Img", ""))
         if not img_url:
             img_url = clean_text(row.get("TaskImageUrl", ""))
+        
         response_rows.append({
             "row_id": int(row["row_id"]),
             "task_id": task_id,
@@ -353,6 +361,7 @@ def api_tasks():
             "observaciones": review.get("observaciones") if review else "",
             "fecha_revision": review.get("fecha_revision") if review else None
         })
+    
     return jsonify(response_rows)
 
 # =====================================================
