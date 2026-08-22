@@ -68,12 +68,11 @@ else:
 
 # Si no hay variable de entorno, intentar con archivo local
 if not GOOGLE_CREDENTIALS_JSON:
-    # Verificar si existe credentials.json local
     if (BASE_DIR / "credentials.json").exists():
         CREDENTIALS_FILE = str(BASE_DIR / "credentials.json")
         print("✅ Usando credentials.json local")
     else:
-        print("❌ No se encontró credentials.json ni en variable de entorno ni local")
+        print("❌ No se encontró credentials.json")
 
 GOOGLE_SHEETS_CONFIG = {
     "sheet_id": SHEET_ID,
@@ -82,7 +81,7 @@ GOOGLE_SHEETS_CONFIG = {
 }
 
 # =====================================================
-# CARGAR CLIENTES DESDE JSON (FUNCIONA SIEMPRE)
+# CARGAR CLIENTES DESDE JSON
 # =====================================================
 
 def cargar_clientes_json():
@@ -111,17 +110,20 @@ def get_google_sheet_client():
         return None
     
     try:
-        print(f"🔍 Intentando conectar con credenciales: {GOOGLE_SHEETS_CONFIG['credentials_file']}")
+        creds_file = GOOGLE_SHEETS_CONFIG["credentials_file"]
+        print(f"🔍 Usando credenciales: {creds_file}")
         
-        # Verificar que el archivo existe
-        if not os.path.exists(GOOGLE_SHEETS_CONFIG["credentials_file"]):
-            print(f"❌ Archivo de credenciales no existe: {GOOGLE_SHEETS_CONFIG['credentials_file']}")
-            return None
+        if not os.path.exists(creds_file):
+            print(f"❌ Archivo de credenciales no existe: {creds_file}")
+            if os.path.exists("credentials.json"):
+                creds_file = "credentials.json"
+                print(f"✅ Usando credentials.json local")
+            else:
+                print(f"❌ No se encuentra credentials.json")
+                return None
         
         scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-        creds = ServiceAccountCredentials.from_json_keyfile_name(
-            GOOGLE_SHEETS_CONFIG["credentials_file"], scope
-        )
+        creds = ServiceAccountCredentials.from_json_keyfile_name(creds_file, scope)
         client = gspread.authorize(creds)
         print("✅ Conexión a Google Sheets exitosa")
         return client
@@ -480,12 +482,10 @@ def api_tasks():
     for _, row in result.iterrows():
         task_id = row["task_id"]
         
-        # Obtener URL de la imagen
         img_url = clean_text(row.get("Img", ""))
         if not img_url:
             img_url = clean_text(row.get("TaskImageUrl", ""))
         
-        # BUSCAR STATUS EN GOOGLE SHEETS (HOJA STATUS)
         status_sheets = get_status_from_sheets(img_url)
         
         if status_sheets:
@@ -523,6 +523,10 @@ def api_tasks():
     
     return jsonify(response_rows)
 
+# =====================================================
+# GUARDAR REVISIÓN
+# =====================================================
+
 @app.route("/api/save_review", methods=["POST"])
 @login_required
 def api_save_review():
@@ -547,13 +551,11 @@ def api_save_review():
     row = task_row.iloc[0]
     supervisor_name = session['supervisor_name']
     
-    # Obtener datos para guardar en Sheets
     fecha_tarea = formatear_fecha(row.get("Fecha"))
     img_url = clean_text(row.get("Img", ""))
     if not img_url:
         img_url = clean_text(row.get("TaskImageUrl", ""))
     
-    # GUARDAR EN GOOGLE SHEETS (hoja Status)
     success = guardar_status_en_sheets(
         fecha=fecha_tarea,
         id_imagen=img_url,
