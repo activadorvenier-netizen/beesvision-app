@@ -891,5 +891,30 @@ def test_sheets_status():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@app.route("/api/test_guardar")
+@login_required
+def test_guardar():
+    """Probar guardado directo en Sheets"""
+    try:
+        # Datos de prueba
+        fecha = "22/08/2026"
+        id_imagen = "https://test.com/imagen_test.jpg"
+        status = "objeccion"
+        supervisor = "Bruno Del Popolo"
+        observaciones = "Prueba desde el endpoint"
+        
+        print("🔍 Probando guardado directo...")
+        resultado = guardar_status_en_sheets(fecha, id_imagen, status, supervisor, observaciones)
+        
+        if resultado:
+            return jsonify({"ok": True, "mensaje": "Guardado exitoso en Sheets"})
+        else:
+            return jsonify({"ok": False, "mensaje": "Fallo el guardado en Sheets"}), 500
+    except Exception as e:
+        print(f"❌ Error en test_guardar: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
