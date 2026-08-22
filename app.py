@@ -1,15 +1,16 @@
-# app.py - VERSIÓN CON GUARDADO EN GOOGLE SHEETS (HOJA STATUS)
+# app.py - VERSIÓN CON GUARDADO EN GOOGLE SHEETS (HOJA STATUS) - PARA RENDER
 from __future__ import annotations
 from pathlib import Path
 from typing import Any
 import pandas as pd
-from flask import Flask, jsonify, render_template, request, session, send_file
+from flask import Flask, jsonify, render_template, request, session
 from functools import wraps
 import hashlib
 from datetime import datetime
-import io
 import json
 import re
+import os
+from tempfile import NamedTemporaryFile
 
 # =====================================================
 # IMPORTS PARA GOOGLE SHEETS
@@ -41,13 +42,43 @@ _data_loaded = False
 _current_mes = None
 
 # =====================================================
-# CONFIGURACIÓN DE GOOGLE SHEETS
+# CONFIGURACIÓN DE GOOGLE SHEETS CON VARIABLES DE ENTORNO
 # =====================================================
 
+# Leer credenciales desde variable de entorno (Render)
+GOOGLE_CREDENTIALS_JSON = os.environ.get("GOOGLE_CREDENTIALS")
+SHEET_ID = os.environ.get("SHEET_ID", "12D-Ru8GNm0EE0NFg4kpcygqcPdqKpor9U4NOA-1TQRs")
+SHEET_NAME = os.environ.get("SHEET_NAME", "Clientes")
+
+# Crear archivo temporal con las credenciales
+CREDENTIALS_FILE = "credentials.json"
+if GOOGLE_CREDENTIALS_JSON:
+    try:
+        creds_data = json.loads(GOOGLE_CREDENTIALS_JSON)
+        temp_creds = NamedTemporaryFile(mode='w', suffix='.json', delete=False)
+        json.dump(creds_data, temp_creds)
+        temp_creds.close()
+        CREDENTIALS_FILE = temp_creds.name
+        print("✅ Credenciales cargadas desde variable de entorno")
+    except Exception as e:
+        print(f"❌ Error al procesar credenciales: {e}")
+        CREDENTIALS_FILE = "credentials.json"
+else:
+    print("⚠️ No se encontró GOOGLE_CREDENTIALS en variables de entorno")
+
+# Si no hay variable de entorno, intentar con archivo local
+if not GOOGLE_CREDENTIALS_JSON:
+    # Verificar si existe credentials.json local
+    if (BASE_DIR / "credentials.json").exists():
+        CREDENTIALS_FILE = str(BASE_DIR / "credentials.json")
+        print("✅ Usando credentials.json local")
+    else:
+        print("❌ No se encontró credentials.json ni en variable de entorno ni local")
+
 GOOGLE_SHEETS_CONFIG = {
-    "sheet_id": "12D-Ru8GNm0EE0NFg4kpcygqcPdqKpor9U4NOA-1TQRs",
-    "sheet_name": "Clientes",
-    "credentials_file": "credentials.json"
+    "sheet_id": SHEET_ID,
+    "sheet_name": SHEET_NAME,
+    "credentials_file": CREDENTIALS_FILE
 }
 
 # =====================================================
@@ -76,13 +107,24 @@ CLIENTES = cargar_clientes_json()
 def get_google_sheet_client():
     """Obtener conexión a Google Sheets"""
     if not GOOGLE_SHEETS_AVAILABLE:
+        print("❌ gspread no disponible")
         return None
+    
     try:
+        print(f"🔍 Intentando conectar con credenciales: {GOOGLE_SHEETS_CONFIG['credentials_file']}")
+        
+        # Verificar que el archivo existe
+        if not os.path.exists(GOOGLE_SHEETS_CONFIG["credentials_file"]):
+            print(f"❌ Archivo de credenciales no existe: {GOOGLE_SHEETS_CONFIG['credentials_file']}")
+            return None
+        
         scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
         creds = ServiceAccountCredentials.from_json_keyfile_name(
             GOOGLE_SHEETS_CONFIG["credentials_file"], scope
         )
-        return gspread.authorize(creds)
+        client = gspread.authorize(creds)
+        print("✅ Conexión a Google Sheets exitosa")
+        return client
     except Exception as e:
         print(f"❌ Error al conectar con Google Sheets: {e}")
         return None
@@ -93,18 +135,24 @@ def guardar_status_en_sheets(fecha, id_imagen, status, supervisor, observaciones
     Columnas: Fecha, ID (URL de la imagen), Status, Supervisor, Observaciones, Fecha Revision
     """
     try:
+        print(f"🔍 Intentando guardar: {id_imagen} -> {status}")
+        
         gc = get_google_sheet_client()
         if gc is None:
             print("❌ No se pudo conectar a Google Sheets")
             return False
         
         sheet = gc.open_by_key(GOOGLE_SHEETS_CONFIG["sheet_id"])
+        print(f"✅ Sheet abierto: {GOOGLE_SHEETS_CONFIG['sheet_id']}")
         
         try:
             worksheet = sheet.worksheet("Status")
+            print("✅ Hoja Status encontrada")
         except gspread.WorksheetNotFound:
+            print("🔄 Hoja Status no existe, creando...")
             worksheet = sheet.add_worksheet(title="Status", rows=1000, cols=10)
             worksheet.append_row(["Fecha", "ID", "Status", "Supervisor", "Observaciones", "Fecha Revision"])
+            print("✅ Hoja Status creada")
         
         id_column = worksheet.col_values(2)
         row_to_update = None
@@ -123,6 +171,8 @@ def guardar_status_en_sheets(fecha, id_imagen, status, supervisor, observaciones
         return True
     except Exception as e:
         print(f"❌ Error al guardar en Sheets: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 def get_status_from_sheets(id_imagen):
@@ -254,14 +304,6 @@ def formatear_fecha(fecha_valor):
         return f"{dia}/{mes}/{año}"
     
     return fecha_str
-
-def formatear_fecha_revision(fecha_revision):
-    """Formatear fecha de revisión a DD/MM/YYYY"""
-    if not fecha_revision:
-        return ""
-    if ' ' in fecha_revision:
-        return fecha_revision.split(' ')[0]
-    return fecha_revision
 
 def _load_data(path: Path) -> pd.DataFrame:
     global _current_excel, _data_loaded, _current_mes
@@ -539,27 +581,37 @@ def api_supervisors():
 def test_sheets_status():
     """Probar conexión a la hoja Status"""
     try:
+        print("🔍 Probando conexión a Google Sheets...")
+        
         gc = get_google_sheet_client()
         if gc is None:
+            print("❌ No se pudo conectar a Google Sheets")
             return jsonify({"error": "No se pudo conectar a Google Sheets"}), 500
         
+        print("✅ Cliente conectado")
         sheet = gc.open_by_key(GOOGLE_SHEETS_CONFIG["sheet_id"])
+        print(f"✅ Sheet abierto: {GOOGLE_SHEETS_CONFIG['sheet_id']}")
         
         try:
             worksheet = sheet.worksheet("Status")
             records = worksheet.get_all_records()
+            print(f"✅ Hoja Status encontrada, {len(records)} registros")
             return jsonify({
                 "conexion": "OK",
                 "total_registros": len(records),
                 "primeros_5": records[:5] if records else []
             })
         except gspread.WorksheetNotFound:
+            print("ℹ️ Hoja Status no existe aún")
             return jsonify({
                 "conexion": "OK",
                 "total_registros": 0,
                 "mensaje": "La hoja 'Status' no existe aún. Se creará al guardar la primera revisión."
             })
     except Exception as e:
+        print(f"❌ Error en test_sheets_status: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
