@@ -1,12 +1,13 @@
-# app.py - VERSIÓN CON GUARDADO EN GOOGLE SHEETS (HOJA STATUS) - PARA RENDER
+# app.py - VERSIÓN CORREGIDA (SOLO AGREGA GUARDADO EN SHEETS)
 from __future__ import annotations
 from pathlib import Path
 from typing import Any
 import pandas as pd
-from flask import Flask, jsonify, render_template, request, session
+from flask import Flask, jsonify, render_template, request, session, send_file
 from functools import wraps
 import hashlib
 from datetime import datetime
+import io
 import json
 import re
 import os
@@ -42,46 +43,17 @@ _data_loaded = False
 _current_mes = None
 
 # =====================================================
-# CONFIGURACIÓN DE GOOGLE SHEETS CON VARIABLES DE ENTORNO
+# CONFIGURACIÓN DE GOOGLE SHEETS
 # =====================================================
 
-# Leer credenciales desde variable de entorno (Render)
-GOOGLE_CREDENTIALS_JSON = os.environ.get("GOOGLE_CREDENTIALS")
-SHEET_ID = os.environ.get("SHEET_ID", "12D-Ru8GNm0EE0NFg4kpcygqcPdqKpor9U4NOA-1TQRs")
-SHEET_NAME = os.environ.get("SHEET_NAME", "Clientes")
-
-# Crear archivo temporal con las credenciales
-CREDENTIALS_FILE = "credentials.json"
-if GOOGLE_CREDENTIALS_JSON:
-    try:
-        creds_data = json.loads(GOOGLE_CREDENTIALS_JSON)
-        temp_creds = NamedTemporaryFile(mode='w', suffix='.json', delete=False)
-        json.dump(creds_data, temp_creds)
-        temp_creds.close()
-        CREDENTIALS_FILE = temp_creds.name
-        print("✅ Credenciales cargadas desde variable de entorno")
-    except Exception as e:
-        print(f"❌ Error al procesar credenciales: {e}")
-        CREDENTIALS_FILE = "credentials.json"
-else:
-    print("⚠️ No se encontró GOOGLE_CREDENTIALS en variables de entorno")
-
-# Si no hay variable de entorno, intentar con archivo local
-if not GOOGLE_CREDENTIALS_JSON:
-    if (BASE_DIR / "credentials.json").exists():
-        CREDENTIALS_FILE = str(BASE_DIR / "credentials.json")
-        print("✅ Usando credentials.json local")
-    else:
-        print("❌ No se encontró credentials.json")
-
 GOOGLE_SHEETS_CONFIG = {
-    "sheet_id": SHEET_ID,
-    "sheet_name": SHEET_NAME,
-    "credentials_file": CREDENTIALS_FILE
+    "sheet_id": "12D-Ru8GNm0EE0NFg4kpcygqcPdqKpor9U4NOA-1TQRs",
+    "sheet_name": "Clientes",
+    "credentials_file": "credentials.json"
 }
 
 # =====================================================
-# CARGAR CLIENTES DESDE JSON
+# CARGAR CLIENTES DESDE JSON (FUNCIONA SIEMPRE)
 # =====================================================
 
 def cargar_clientes_json():
@@ -106,27 +78,13 @@ CLIENTES = cargar_clientes_json()
 def get_google_sheet_client():
     """Obtener conexión a Google Sheets"""
     if not GOOGLE_SHEETS_AVAILABLE:
-        print("❌ gspread no disponible")
         return None
-    
     try:
-        creds_file = GOOGLE_SHEETS_CONFIG["credentials_file"]
-        print(f"🔍 Usando credenciales: {creds_file}")
-        
-        if not os.path.exists(creds_file):
-            print(f"❌ Archivo de credenciales no existe: {creds_file}")
-            if os.path.exists("credentials.json"):
-                creds_file = "credentials.json"
-                print(f"✅ Usando credentials.json local")
-            else:
-                print(f"❌ No se encuentra credentials.json")
-                return None
-        
         scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-        creds = ServiceAccountCredentials.from_json_keyfile_name(creds_file, scope)
-        client = gspread.authorize(creds)
-        print("✅ Conexión a Google Sheets exitosa")
-        return client
+        creds = ServiceAccountCredentials.from_json_keyfile_name(
+            GOOGLE_SHEETS_CONFIG["credentials_file"], scope
+        )
+        return gspread.authorize(creds)
     except Exception as e:
         print(f"❌ Error al conectar con Google Sheets: {e}")
         return None
@@ -137,24 +95,18 @@ def guardar_status_en_sheets(fecha, id_imagen, status, supervisor, observaciones
     Columnas: Fecha, ID (URL de la imagen), Status, Supervisor, Observaciones, Fecha Revision
     """
     try:
-        print(f"🔍 Intentando guardar: {id_imagen} -> {status}")
-        
         gc = get_google_sheet_client()
         if gc is None:
             print("❌ No se pudo conectar a Google Sheets")
             return False
         
         sheet = gc.open_by_key(GOOGLE_SHEETS_CONFIG["sheet_id"])
-        print(f"✅ Sheet abierto: {GOOGLE_SHEETS_CONFIG['sheet_id']}")
         
         try:
             worksheet = sheet.worksheet("Status")
-            print("✅ Hoja Status encontrada")
         except gspread.WorksheetNotFound:
-            print("🔄 Hoja Status no existe, creando...")
             worksheet = sheet.add_worksheet(title="Status", rows=1000, cols=10)
             worksheet.append_row(["Fecha", "ID", "Status", "Supervisor", "Observaciones", "Fecha Revision"])
-            print("✅ Hoja Status creada")
         
         id_column = worksheet.col_values(2)
         row_to_update = None
@@ -173,8 +125,6 @@ def guardar_status_en_sheets(fecha, id_imagen, status, supervisor, observaciones
         return True
     except Exception as e:
         print(f"❌ Error al guardar en Sheets: {e}")
-        import traceback
-        traceback.print_exc()
         return False
 
 def get_status_from_sheets(id_imagen):
@@ -269,11 +219,11 @@ def login_required(f):
     return decorated_function
 
 def _build_task_id(row: pd.Series) -> str:
-    """Crear ID único para cada tarea usando URL de la imagen"""
-    img_url = clean_text(row.get("Img", ""))
-    if not img_url:
-        img_url = clean_text(row.get("TaskImageUrl", ""))
-    raw = img_url
+    """Crear ID único para cada tarea usando POC ID + Fecha + Detalle Tarea"""
+    poc_id = clean_text(row.get("POC ID", ""))
+    fecha = str(row.get("Fecha", ""))
+    detalle = clean_text(row.get("Detalle Tarea", ""))
+    raw = f"{poc_id}|{fecha}|{detalle}"
     return hashlib.md5(raw.encode()).hexdigest()[:12]
 
 def get_mes_actual():
@@ -314,30 +264,11 @@ def _load_data(path: Path) -> pd.DataFrame:
     _current_excel = path.name
     _current_mes = get_mes_actual()
     
-    # =====================================================
-    # MAPEO FLEXIBLE DE COLUMNA DE IMAGEN
-    # =====================================================
-    # Buscar columna de imagen con diferentes nombres
-    img_column = None
-    posibles_nombres = ["Img", "Imagen", "Foto", "Image", "URL Imagen", "TaskImageUrl"]
+    if "TaskImageUrl" in df.columns and "Img" not in df.columns:
+        df = df.rename(columns={"TaskImageUrl": "Img"})
     
-    for nombre in posibles_nombres:
-        if nombre in df.columns:
-            img_column = nombre
-            break
+    required = ["Fecha", "Promotor", "POC ID", "Detalle Tarea", "Img", "Completada", "Validada", "Visita Valida", "Supervisor ID"]
     
-    if img_column and img_column != "Img":
-        df = df.rename(columns={img_column: "Img"})
-        print(f"✅ Columna de imagen renombrada: '{img_column}' -> 'Img'")
-    elif not img_column:
-        # Si no se encuentra ninguna columna de imagen, crear una vacía
-        df["Img"] = ""
-        print("⚠️ No se encontró columna de imagen, se creó una vacía")
-    # =====================================================
-    
-    required = ["Fecha", "Promotor", "POC ID", "Detalle Tarea", "Completada", "Validada", "Visita Valida", "Supervisor ID"]
-    
-    # Verificar que las columnas requeridas existan (Img ya está asegurada)
     missing = [c for c in required if c not in df.columns]
     if missing:
         raise ValueError(f"Columnas faltantes: {missing}")
@@ -363,7 +294,6 @@ def _load_data(path: Path) -> pd.DataFrame:
     filtered["row_id"] = range(1, len(filtered) + 1)
     filtered["task_id"] = filtered.apply(_build_task_id, axis=1)
     
-    print(f"📊 Columnas encontradas: {df.columns.tolist()}")
     print(f"📊 Task IDs generados: {filtered['task_id'].head().tolist()}")
     print(f"📊 Total tareas: {len(filtered)}")
     
@@ -473,6 +403,7 @@ def api_tasks():
     end_date = request.args.get("end_date", type=str)
     
     result = _cached_df[_cached_df["Supervisor ID"] == supervisor_id].copy()
+    
     result = result.sort_values(by="Fecha", ascending=True)
     
     if result.empty:
@@ -506,6 +437,7 @@ def api_tasks():
         if not img_url:
             img_url = clean_text(row.get("TaskImageUrl", ""))
         
+        # Buscar status en Sheets
         status_sheets = get_status_from_sheets(img_url)
         
         if status_sheets:
@@ -543,10 +475,6 @@ def api_tasks():
     
     return jsonify(response_rows)
 
-# =====================================================
-# GUARDAR REVISIÓN
-# =====================================================
-
 @app.route("/api/save_review", methods=["POST"])
 @login_required
 def api_save_review():
@@ -576,6 +504,7 @@ def api_save_review():
     if not img_url:
         img_url = clean_text(row.get("TaskImageUrl", ""))
     
+    # Guardar en Google Sheets
     success = guardar_status_en_sheets(
         fecha=fecha_tarea,
         id_imagen=img_url,
@@ -603,37 +532,27 @@ def api_supervisors():
 def test_sheets_status():
     """Probar conexión a la hoja Status"""
     try:
-        print("🔍 Probando conexión a Google Sheets...")
-        
         gc = get_google_sheet_client()
         if gc is None:
-            print("❌ No se pudo conectar a Google Sheets")
             return jsonify({"error": "No se pudo conectar a Google Sheets"}), 500
         
-        print("✅ Cliente conectado")
         sheet = gc.open_by_key(GOOGLE_SHEETS_CONFIG["sheet_id"])
-        print(f"✅ Sheet abierto: {GOOGLE_SHEETS_CONFIG['sheet_id']}")
         
         try:
             worksheet = sheet.worksheet("Status")
             records = worksheet.get_all_records()
-            print(f"✅ Hoja Status encontrada, {len(records)} registros")
             return jsonify({
                 "conexion": "OK",
                 "total_registros": len(records),
                 "primeros_5": records[:5] if records else []
             })
         except gspread.WorksheetNotFound:
-            print("ℹ️ Hoja Status no existe aún")
             return jsonify({
                 "conexion": "OK",
                 "total_registros": 0,
                 "mensaje": "La hoja 'Status' no existe aún. Se creará al guardar la primera revisión."
             })
     except Exception as e:
-        print(f"❌ Error en test_sheets_status: {e}")
-        import traceback
-        traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
