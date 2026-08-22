@@ -357,28 +357,6 @@
             cursor: not-allowed;
         }
         
-        .btn-close-month {
-            padding: 8px 20px;
-            background: #c62828;
-            color: var(--blanco);
-            border: none;
-            border-radius: 8px;
-            cursor: pointer;
-            font-weight: 600;
-            transition: all 0.3s;
-        }
-        
-        .btn-close-month:hover:not(:disabled) {
-            background: #b71c1c;
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(198, 40, 40, 0.3);
-        }
-        
-        .btn-close-month:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-        }
-        
         .actions-bar {
             display: flex;
             gap: 10px;
@@ -891,7 +869,6 @@
                 <button class="btn-reset" id="btnReset" onclick="resetFilters()">Resetear</button>
                 <div class="actions-bar">
                     <button class="btn-export" id="btnExport" onclick="exportReviews()">📊 Exportar Reporte</button>
-                    <button class="btn-close-month" id="btnCloseMonth" onclick="closeMonth()">🔒 Cerrar Mes</button>
                 </div>
             </div>
             
@@ -1064,7 +1041,6 @@
             document.getElementById('btnFilter').disabled = !enabled;
             document.getElementById('btnReset').disabled = !enabled;
             document.getElementById('btnExport').disabled = !enabled;
-            document.getElementById('btnCloseMonth').disabled = !enabled;
             document.getElementById('filterStartDate').disabled = !enabled;
             document.getElementById('filterEndDate').disabled = !enabled;
             document.getElementById('filterStatus').disabled = !enabled;
@@ -1343,52 +1319,6 @@
                 showToast('✅ Reporte descargado exitosamente', 'success');
             } catch (error) {
                 showToast('Error: ' + error.message, 'error');
-            }
-        }
-        
-        async function closeMonth() {
-            const confirmMsg = '⚠️ ESTA ACCIÓN ES DEFINITIVA\n\nSe exportarán TODAS tus revisiones y se LIMPIARÁ la base de datos.\n\n¿Estás seguro?';
-            if (!confirm(confirmMsg)) return;
-            const confirm2 = confirm('Última confirmación: ¿Ya descargaste el reporte de respaldo?');
-            if (!confirm2) {
-                showToast('Cierre cancelado. Descarga el reporte primero.', 'error');
-                return;
-            }
-            try {
-                const btnClose = document.getElementById('btnCloseMonth');
-                btnClose.disabled = true;
-                btnClose.textContent = '⏳ Cerrando...';
-                showToast('⏳ Generando cierre de mes...', 'info');
-                const response = await fetch('/api/close_month', { method: 'POST' });
-                if (!response.ok) {
-                    const error = await response.json();
-                    throw new Error(error.error || 'Error en el cierre');
-                }
-                const blob = await response.blob();
-                const url = window.URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                const contentDisposition = response.headers.get('Content-Disposition');
-                let filename = 'cierre_mes.xlsx';
-                if (contentDisposition) {
-                    const match = contentDisposition.match(/filename=([^;]+)/);
-                    if (match) filename = match[1].replace(/["']/g, '');
-                }
-                a.download = filename;
-                document.body.appendChild(a);
-                a.click();
-                a.remove();
-                window.URL.revokeObjectURL(url);
-                showToast('✅ Cierre de mes completado', 'success');
-                hasDataLoaded = false;
-                enableControls(false);
-                setTimeout(() => location.reload(), 1500);
-            } catch (error) {
-                showToast('Error: ' + error.message, 'error');
-            } finally {
-                const btnClose = document.getElementById('btnCloseMonth');
-                btnClose.disabled = false;
-                btnClose.textContent = '🔒 Cerrar Mes';
             }
         }
         
