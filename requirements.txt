@@ -1,4 +1,6 @@
 flask
 pandas
 openpyxl
+gspread
+oauth2client
 gunicorn
