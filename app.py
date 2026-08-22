@@ -8,10 +8,10 @@ from functools import wraps
 import hashlib
 from datetime import datetime
 import io
+from models import ReviewDatabase
 import json
 import re
 import os
-from tempfile import NamedTemporaryFile
 
 # =====================================================
 # IMPORTS PARA GOOGLE SHEETS
@@ -27,6 +27,8 @@ except ImportError:
 BASE_DIR = Path(__file__).resolve().parent
 UPLOAD_DIR = BASE_DIR / "uploads"
 UPLOAD_DIR.mkdir(exist_ok=True)
+
+db = ReviewDatabase()
 
 SUPERVISORS = {
     14: "Bruno Del Popolo",
@@ -257,6 +259,14 @@ def formatear_fecha(fecha_valor):
     
     return fecha_str
 
+def formatear_fecha_revision(fecha_revision):
+    """Formatear fecha de revisión a DD/MM/YYYY"""
+    if not fecha_revision:
+        return ""
+    if ' ' in fecha_revision:
+        return fecha_revision.split(' ')[0]
+    return fecha_revision
+
 def _load_data(path: Path) -> pd.DataFrame:
     global _current_excel, _data_loaded, _current_mes
     
@@ -304,6 +314,19 @@ def _load_data(path: Path) -> pd.DataFrame:
 # =====================================================
 # ROUTES
 # =====================================================
+
+@app.route("/api/verificar_revisiones")
+@login_required
+def verificar_revisiones():
+    """Ver todas las revisiones guardadas"""
+    supervisor_id = session.get('supervisor_id')
+    mes = _current_mes or get_mes_actual()
+    reviews = db.get_all_reviews(supervisor_id, mes)
+    
+    return jsonify({
+        "total": len(reviews),
+        "revisiones": reviews[:10]
+    })
 
 @app.route("/")
 def index():
@@ -429,6 +452,7 @@ def api_tasks():
     if result.empty:
         return jsonify({"error": "No hay tareas en el rango de fechas", "no_tasks": True}), 404
     
+    # Obtener status desde Sheets
     response_rows = []
     for _, row in result.iterrows():
         task_id = row["task_id"]
@@ -437,7 +461,7 @@ def api_tasks():
         if not img_url:
             img_url = clean_text(row.get("TaskImageUrl", ""))
         
-        # Buscar status en Sheets
+        # Buscar en Sheets
         status_sheets = get_status_from_sheets(img_url)
         
         if status_sheets:
@@ -475,6 +499,10 @@ def api_tasks():
     
     return jsonify(response_rows)
 
+# =====================================================
+# GUARDAR REVISIÓN
+# =====================================================
+
 @app.route("/api/save_review", methods=["POST"])
 @login_required
 def api_save_review():
@@ -497,15 +525,30 @@ def api_save_review():
         return jsonify({"error": "Tarea no encontrada"}), 404
     
     row = task_row.iloc[0]
+    row_id = int(row["row_id"])
+    supervisor_id = session['supervisor_id']
     supervisor_name = session['supervisor_name']
     
+    # Obtener datos para guardar en Sheets
     fecha_tarea = formatear_fecha(row.get("Fecha"))
     img_url = clean_text(row.get("Img", ""))
     if not img_url:
         img_url = clean_text(row.get("TaskImageUrl", ""))
     
-    # Guardar en Google Sheets
-    success = guardar_status_en_sheets(
+    # 1. Guardar en base de datos local (respaldo)
+    success_local = db.save_review(
+        task_id=task_id,
+        row_id=row_id,
+        supervisor_id=supervisor_id,
+        supervisor_name=supervisor_name,
+        status=status,
+        observaciones=observaciones,
+        excel_file=_current_excel or "data.xlsx",
+        mes_revision=_current_mes or get_mes_actual()
+    )
+    
+    # 2. Guardar en Google Sheets (hoja Status)
+    success_sheets = guardar_status_en_sheets(
         fecha=fecha_tarea,
         id_imagen=img_url,
         status=status,
@@ -513,15 +556,307 @@ def api_save_review():
         observaciones=observaciones
     )
     
-    if success:
+    if success_local or success_sheets:
         return jsonify({"ok": True, "message": "Revisión guardada correctamente"})
     else:
         return jsonify({"error": "Error al guardar la revisión"}), 500
+
+@app.route("/api/delete_review/<task_id>", methods=["DELETE"])
+@login_required
+def api_delete_review(task_id):
+    try:
+        supervisor_id = session.get('supervisor_id')
+        
+        if _cached_df is None or not _data_loaded:
+            return jsonify({"error": "No hay datos cargados"}), 404
+        
+        task_row = _cached_df[_cached_df["task_id"] == task_id]
+        if task_row.empty:
+            return jsonify({"error": "Tarea no encontrada"}), 404
+        
+        success = db.delete_review(task_id, supervisor_id)
+        
+        if success:
+            return jsonify({"ok": True, "message": "Revisión eliminada correctamente"})
+        else:
+            return jsonify({"error": "Error al eliminar la revisión"}), 500
+            
+    except Exception as e:
+        print(f"Error al eliminar revisión: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/stats")
+@login_required
+def api_stats():
+    global _data_loaded
+    
+    supervisor_id = session['supervisor_id']
+    mes = _current_mes or get_mes_actual()
+    stats = db.get_supervisor_stats(supervisor_id, mes)
+    
+    if not _data_loaded or _cached_df is None:
+        return jsonify({
+            "total_revisados": stats["total"],
+            "total_pendientes": 0,
+            "by_status": stats["by_status"],
+            "porcentaje": 0,
+            "no_data": True
+        })
+    
+    total_disponibles = len(_cached_df[_cached_df["Supervisor ID"] == supervisor_id])
+    task_ids = _cached_df[_cached_df["Supervisor ID"] == supervisor_id]["task_id"].tolist()
+    pending_tasks = db.get_pending_tasks(supervisor_id, task_ids)
+    total_pendientes = len(pending_tasks)
+    
+    return jsonify({
+        "total_revisados": stats["total"],
+        "total_pendientes": total_pendientes,
+        "by_status": stats["by_status"],
+        "porcentaje": round((stats["total"] / total_disponibles * 100) if total_disponibles > 0 else 0, 1),
+        "total_disponibles": total_disponibles,
+        "has_data": True,
+        "mes": mes
+    })
 
 @app.route("/api/supervisors")
 def api_supervisors():
     items = [{"id": sid, "name": name} for sid, name in SUPERVISORS.items()]
     return jsonify(items)
+
+@app.route("/api/export_reviews", methods=["GET"])
+@login_required
+def api_export_reviews():
+    try:
+        supervisor_id = session.get('supervisor_id')
+        supervisor_name = session.get('supervisor_name')
+        mes = _current_mes or get_mes_actual()
+        
+        reviews = db.get_all_reviews(supervisor_id, mes)
+        
+        if not reviews:
+            return jsonify({"error": "No hay revisiones para exportar"}), 404
+        
+        if _cached_df is None or not _data_loaded:
+            export_data = []
+            for review in reviews:
+                export_data.append({
+                    "Fecha Revisión": formatear_fecha_revision(review.get("fecha_revision", "")),
+                    "Fecha Tarea": "",
+                    "POC ID": "",
+                    "Detalle Tarea": "",
+                    "URL Imagen": "",
+                    "ID Tarea": "",
+                    "Razón Social": "",
+                    "Direccion": "",
+                    "Promotor": "",
+                    "Status": review["status"],
+                    "Observaciones": review.get("observaciones", "")
+                })
+            df_export = pd.DataFrame(export_data)
+        else:
+            task_data = {}
+            for _, row in _cached_df.iterrows():
+                raw_poc_id = clean_text(row.get("POC ID", ""))
+                client_info = get_client_info(raw_poc_id) if raw_poc_id else None
+                img_url = clean_text(row.get("Img", ""))
+                if not img_url:
+                    img_url = clean_text(row.get("TaskImageUrl", ""))
+                
+                task_data[row["task_id"]] = {
+                    "fecha_tarea": formatear_fecha(row.get("Fecha")),
+                    "poc_id_completo": raw_poc_id,
+                    "detalle_tarea": row.get("Detalle Tarea", ""),
+                    "imagen": img_url,
+                    "id_tarea": row.get("ID Tarea", ""),
+                    "razon_social": client_info.get("nombre") if client_info else "",
+                    "direccion": client_info.get("direccion") if client_info else "",
+                    "promotor": row.get("Promotor", "")
+                }
+            
+            export_data = []
+            for review in reviews:
+                task_id = review["task_id"]
+                task_info = task_data.get(task_id, {})
+                
+                export_data.append({
+                    "Fecha Revisión": formatear_fecha_revision(review.get("fecha_revision", "")),
+                    "Fecha Tarea": task_info.get("fecha_tarea", ""),
+                    "POC ID": task_info.get("poc_id_completo", ""),
+                    "Detalle Tarea": task_info.get("detalle_tarea", ""),
+                    "URL Imagen": task_info.get("imagen", ""),
+                    "ID Tarea": task_info.get("id_tarea", ""),
+                    "Razón Social": task_info.get("razon_social", ""),
+                    "Direccion": task_info.get("direccion", ""),
+                    "Promotor": task_info.get("promotor", ""),
+                    "Status": review["status"],
+                    "Observaciones": review.get("observaciones", "")
+                })
+            df_export = pd.DataFrame(export_data)
+        
+        output = io.BytesIO()
+        
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df_export.to_excel(writer, sheet_name='Revisiones', index=False)
+            
+            worksheet = writer.sheets['Revisiones']
+            
+            from openpyxl.styles import PatternFill
+            
+            azul_claro = PatternFill(start_color="D4E6F1", end_color="D4E6F1", fill_type="solid")
+            
+            for col_idx in range(0, 6):
+                for row in range(1, len(df_export) + 2):
+                    cell = worksheet.cell(row=row, column=col_idx + 1)
+                    cell.fill = azul_claro
+            
+            for column in worksheet.columns:
+                max_length = 0
+                column_letter = column[0].column_letter
+                for cell in column:
+                    try:
+                        if len(str(cell.value)) > max_length:
+                            max_length = len(str(cell.value))
+                    except:
+                        pass
+                adjusted_width = min(max_length + 2, 50)
+                worksheet.column_dimensions[column_letter].width = adjusted_width
+        
+        output.seek(0)
+        filename = f"reporte_revisiones_{supervisor_name}_{mes}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+        
+        return send_file(
+            output,
+            download_name=filename,
+            as_attachment=True,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+        
+    except Exception as e:
+        print(f"Error al exportar: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/close_month", methods=["POST"])
+@login_required
+def api_close_month():
+    global _cached_df, _data_loaded
+    
+    try:
+        supervisor_id = session.get('supervisor_id')
+        supervisor_name = session.get('supervisor_name')
+        mes = _current_mes or get_mes_actual()
+        
+        reviews = db.get_all_reviews(supervisor_id, mes)
+        
+        if not reviews:
+            return jsonify({"error": "No hay revisiones para exportar"}), 404
+        
+        if _cached_df is None or not _data_loaded:
+            export_data = []
+            for review in reviews:
+                export_data.append({
+                    "Fecha Revisión": formatear_fecha_revision(review.get("fecha_revision", "")),
+                    "Fecha Tarea": "",
+                    "POC ID": "",
+                    "Detalle Tarea": "",
+                    "URL Imagen": "",
+                    "ID Tarea": "",
+                    "Razón Social": "",
+                    "Direccion": "",
+                    "Promotor": "",
+                    "Status": review["status"],
+                    "Observaciones": review.get("observaciones", "")
+                })
+            df_export = pd.DataFrame(export_data)
+        else:
+            task_data = {}
+            for _, row in _cached_df.iterrows():
+                raw_poc_id = clean_text(row.get("POC ID", ""))
+                client_info = get_client_info(raw_poc_id) if raw_poc_id else None
+                img_url = clean_text(row.get("Img", ""))
+                if not img_url:
+                    img_url = clean_text(row.get("TaskImageUrl", ""))
+                
+                task_data[row["task_id"]] = {
+                    "fecha_tarea": formatear_fecha(row.get("Fecha")),
+                    "poc_id_completo": raw_poc_id,
+                    "detalle_tarea": row.get("Detalle Tarea", ""),
+                    "imagen": img_url,
+                    "id_tarea": row.get("ID Tarea", ""),
+                    "razon_social": client_info.get("nombre") if client_info else "",
+                    "direccion": client_info.get("direccion") if client_info else "",
+                    "promotor": row.get("Promotor", "")
+                }
+            
+            export_data = []
+            for review in reviews:
+                task_id = review["task_id"]
+                task_info = task_data.get(task_id, {})
+                
+                export_data.append({
+                    "Fecha Revisión": formatear_fecha_revision(review.get("fecha_revision", "")),
+                    "Fecha Tarea": task_info.get("fecha_tarea", ""),
+                    "POC ID": task_info.get("poc_id_completo", ""),
+                    "Detalle Tarea": task_info.get("detalle_tarea", ""),
+                    "URL Imagen": task_info.get("imagen", ""),
+                    "ID Tarea": task_info.get("id_tarea", ""),
+                    "Razón Social": task_info.get("razon_social", ""),
+                    "Direccion": task_info.get("direccion", ""),
+                    "Promotor": task_info.get("promotor", ""),
+                    "Status": review["status"],
+                    "Observaciones": review.get("observaciones", "")
+                })
+            df_export = pd.DataFrame(export_data)
+        
+        output = io.BytesIO()
+        
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df_export.to_excel(writer, sheet_name='Revisiones Cierre', index=False)
+            
+            worksheet = writer.sheets['Revisiones Cierre']
+            
+            from openpyxl.styles import PatternFill
+            
+            azul_claro = PatternFill(start_color="D4E6F1", end_color="D4E6F1", fill_type="solid")
+            
+            for col_idx in range(0, 6):
+                for row in range(1, len(df_export) + 2):
+                    cell = worksheet.cell(row=row, column=col_idx + 1)
+                    cell.fill = azul_claro
+            
+            for column in worksheet.columns:
+                max_length = 0
+                column_letter = column[0].column_letter
+                for cell in column:
+                    try:
+                        if len(str(cell.value)) > max_length:
+                            max_length = len(str(cell.value))
+                    except:
+                        pass
+                adjusted_width = min(max_length + 2, 50)
+                worksheet.column_dimensions[column_letter].width = adjusted_width
+        
+        output.seek(0)
+        filename = f"cierre_mes_{supervisor_name}_{mes}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+        
+        db.clear_reviews(supervisor_id, mes)
+        
+        file_path = UPLOAD_DIR / "data.xlsx"
+        if file_path.exists():
+            file_path.unlink()
+        
+        _cached_df = None
+        _data_loaded = False
+        
+        return send_file(
+            output,
+            download_name=filename,
+            as_attachment=True,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+        
+    except Exception as e:
+        print(f"Error en cierre de mes: {e}")
+        return jsonify({"error": str(e)}), 500
 
 # =====================================================
 # ENDPOINTS DE PRUEBA
