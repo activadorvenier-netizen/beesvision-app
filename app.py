@@ -314,11 +314,30 @@ def _load_data(path: Path) -> pd.DataFrame:
     _current_excel = path.name
     _current_mes = get_mes_actual()
     
-    if "TaskImageUrl" in df.columns and "Img" not in df.columns:
-        df = df.rename(columns={"TaskImageUrl": "Img"})
+    # =====================================================
+    # MAPEO FLEXIBLE DE COLUMNA DE IMAGEN
+    # =====================================================
+    # Buscar columna de imagen con diferentes nombres
+    img_column = None
+    posibles_nombres = ["Img", "Imagen", "Foto", "Image", "URL Imagen", "TaskImageUrl"]
     
-    required = ["Fecha", "Promotor", "POC ID", "Detalle Tarea", "Img", "Completada", "Validada", "Visita Valida", "Supervisor ID"]
+    for nombre in posibles_nombres:
+        if nombre in df.columns:
+            img_column = nombre
+            break
     
+    if img_column and img_column != "Img":
+        df = df.rename(columns={img_column: "Img"})
+        print(f"✅ Columna de imagen renombrada: '{img_column}' -> 'Img'")
+    elif not img_column:
+        # Si no se encuentra ninguna columna de imagen, crear una vacía
+        df["Img"] = ""
+        print("⚠️ No se encontró columna de imagen, se creó una vacía")
+    # =====================================================
+    
+    required = ["Fecha", "Promotor", "POC ID", "Detalle Tarea", "Completada", "Validada", "Visita Valida", "Supervisor ID"]
+    
+    # Verificar que las columnas requeridas existan (Img ya está asegurada)
     missing = [c for c in required if c not in df.columns]
     if missing:
         raise ValueError(f"Columnas faltantes: {missing}")
@@ -344,6 +363,7 @@ def _load_data(path: Path) -> pd.DataFrame:
     filtered["row_id"] = range(1, len(filtered) + 1)
     filtered["task_id"] = filtered.apply(_build_task_id, axis=1)
     
+    print(f"📊 Columnas encontradas: {df.columns.tolist()}")
     print(f"📊 Task IDs generados: {filtered['task_id'].head().tolist()}")
     print(f"📊 Total tareas: {len(filtered)}")
     
