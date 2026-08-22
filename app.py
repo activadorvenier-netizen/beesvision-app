@@ -1,4 +1,4 @@
-# app.py - VERSIÓN SIMPLE Y FUNCIONANDO
+# app.py - VERSIÓN CON GUARDADO EN GOOGLE SHEETS (HOJA STATUS)
 from __future__ import annotations
 from pathlib import Path
 from typing import Any
@@ -8,15 +8,23 @@ from functools import wraps
 import hashlib
 from datetime import datetime
 import io
-from models import ReviewDatabase
 import json
 import re
+
+# =====================================================
+# IMPORTS PARA GOOGLE SHEETS
+# =====================================================
+try:
+    import gspread
+    from oauth2client.service_account import ServiceAccountCredentials
+    GOOGLE_SHEETS_AVAILABLE = True
+except ImportError:
+    GOOGLE_SHEETS_AVAILABLE = False
+    print("⚠️ gspread no instalado")
 
 BASE_DIR = Path(__file__).resolve().parent
 UPLOAD_DIR = BASE_DIR / "uploads"
 UPLOAD_DIR.mkdir(exist_ok=True)
-
-db = ReviewDatabase()
 
 SUPERVISORS = {
     14: "Bruno Del Popolo",
@@ -31,6 +39,16 @@ _cached_df = None
 _current_excel = None
 _data_loaded = False
 _current_mes = None
+
+# =====================================================
+# CONFIGURACIÓN DE GOOGLE SHEETS
+# =====================================================
+
+GOOGLE_SHEETS_CONFIG = {
+    "sheet_id": "12D-Ru8GNm0EE0NFg4kpcygqcPdqKpor9U4NOA-1TQRs",
+    "sheet_name": "Clientes",
+    "credentials_file": "credentials.json"
+}
 
 # =====================================================
 # CARGAR CLIENTES DESDE JSON (FUNCIONA SIEMPRE)
@@ -50,6 +68,93 @@ def cargar_clientes_json():
     return {}
 
 CLIENTES = cargar_clientes_json()
+
+# =====================================================
+# FUNCIONES PARA GOOGLE SHEETS - HOJA STATUS
+# =====================================================
+
+def get_google_sheet_client():
+    """Obtener conexión a Google Sheets"""
+    if not GOOGLE_SHEETS_AVAILABLE:
+        return None
+    try:
+        scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+        creds = ServiceAccountCredentials.from_json_keyfile_name(
+            GOOGLE_SHEETS_CONFIG["credentials_file"], scope
+        )
+        return gspread.authorize(creds)
+    except Exception as e:
+        print(f"❌ Error al conectar con Google Sheets: {e}")
+        return None
+
+def guardar_status_en_sheets(fecha, id_imagen, status, supervisor, observaciones=""):
+    """
+    Guardar el status de una foto en la hoja 'Status' de Google Sheets
+    Columnas: Fecha, ID (URL de la imagen), Status, Supervisor, Observaciones, Fecha Revision
+    """
+    try:
+        gc = get_google_sheet_client()
+        if gc is None:
+            print("❌ No se pudo conectar a Google Sheets")
+            return False
+        
+        sheet = gc.open_by_key(GOOGLE_SHEETS_CONFIG["sheet_id"])
+        
+        try:
+            worksheet = sheet.worksheet("Status")
+        except gspread.WorksheetNotFound:
+            worksheet = sheet.add_worksheet(title="Status", rows=1000, cols=10)
+            worksheet.append_row(["Fecha", "ID", "Status", "Supervisor", "Observaciones", "Fecha Revision"])
+        
+        id_column = worksheet.col_values(2)
+        row_to_update = None
+        if id_imagen in id_column:
+            row_to_update = id_column.index(id_imagen) + 1
+        
+        fecha_revision = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+        
+        if row_to_update:
+            worksheet.update(f'C{row_to_update}:F{row_to_update}', [[status, supervisor, observaciones, fecha_revision]])
+            print(f"✅ Status actualizado en Sheets: {id_imagen} -> {status}")
+        else:
+            worksheet.append_row([fecha, id_imagen, status, supervisor, observaciones, fecha_revision])
+            print(f"✅ Status guardado en Sheets: {id_imagen} -> {status}")
+        
+        return True
+    except Exception as e:
+        print(f"❌ Error al guardar en Sheets: {e}")
+        return False
+
+def get_status_from_sheets(id_imagen):
+    """
+    Obtener el status de una foto desde la hoja 'Status'
+    """
+    try:
+        gc = get_google_sheet_client()
+        if gc is None:
+            return None
+        
+        sheet = gc.open_by_key(GOOGLE_SHEETS_CONFIG["sheet_id"])
+        
+        try:
+            worksheet = sheet.worksheet("Status")
+        except gspread.WorksheetNotFound:
+            return None
+        
+        id_column = worksheet.col_values(2)
+        if id_imagen in id_column:
+            row_index = id_column.index(id_imagen) + 1
+            row_data = worksheet.row_values(row_index)
+            return {
+                "status": row_data[2] if len(row_data) > 2 else None,
+                "supervisor": row_data[3] if len(row_data) > 3 else None,
+                "observaciones": row_data[4] if len(row_data) > 4 else None,
+                "fecha_revision": row_data[5] if len(row_data) > 5 else None
+            }
+        return None
+    except Exception as e:
+        print(f"❌ Error al leer status desde Sheets: {e}")
+        return None
 
 # =====================================================
 # FUNCIONES
@@ -80,7 +185,6 @@ def extract_short_poc_id(poc_id):
         poc_id = poc_id[:-2]
     poc_id = poc_id.replace('-', '').replace(' ', '')
     
-    # Prefijo 053822 (con 0) o 53822 (sin 0)
     if poc_id.startswith("053822"):
         resultado = poc_id[6:].lstrip('0')
         return resultado if resultado else "0"
@@ -113,12 +217,11 @@ def login_required(f):
     return decorated_function
 
 def _build_task_id(row: pd.Series) -> str:
-    """Crear ID único para cada tarea usando POC ID + Fecha + Detalle Tarea"""
-    poc_id = clean_text(row.get("POC ID", ""))
-    fecha = str(row.get("Fecha", ""))
-    detalle = clean_text(row.get("Detalle Tarea", ""))
-    # Usar POC ID + Fecha + Detalle Tarea
-    raw = f"{poc_id}|{fecha}|{detalle}"
+    """Crear ID único para cada tarea usando URL de la imagen"""
+    img_url = clean_text(row.get("Img", ""))
+    if not img_url:
+        img_url = clean_text(row.get("TaskImageUrl", ""))
+    raw = img_url
     return hashlib.md5(raw.encode()).hexdigest()[:12]
 
 def get_mes_actual():
@@ -197,10 +300,8 @@ def _load_data(path: Path) -> pd.DataFrame:
     filtered["row_id"] = range(1, len(filtered) + 1)
     filtered["task_id"] = filtered.apply(_build_task_id, axis=1)
     
-    # === LOG: Mostrar primeros task_id generados ===
     print(f"📊 Task IDs generados: {filtered['task_id'].head().tolist()}")
     print(f"📊 Total tareas: {len(filtered)}")
-    # ============================================
     
     _data_loaded = True
     
@@ -209,19 +310,6 @@ def _load_data(path: Path) -> pd.DataFrame:
 # =====================================================
 # ROUTES
 # =====================================================
-
-@app.route("/api/verificar_revisiones")
-@login_required
-def verificar_revisiones():
-    """Ver todas las revisiones guardadas"""
-    supervisor_id = session.get('supervisor_id')
-    mes = _current_mes or get_mes_actual()
-    reviews = db.get_all_reviews(supervisor_id, mes)
-    
-    return jsonify({
-        "total": len(reviews),
-        "revisiones": reviews[:10]  # Mostrar las primeras 10
-    })
 
 @app.route("/")
 def index():
@@ -321,62 +409,57 @@ def api_tasks():
     end_date = request.args.get("end_date", type=str)
     
     result = _cached_df[_cached_df["Supervisor ID"] == supervisor_id].copy()
-    
-    # Ordenar por fecha (más antiguas primero)
     result = result.sort_values(by="Fecha", ascending=True)
     
     if result.empty:
         return jsonify({"error": f"No hay tareas asignadas para {SUPERVISORS[supervisor_id]}", "no_tasks": True}), 404
     
-    # =====================================================
-    # FILTROS DE FECHA CORREGIDOS (usando datetime)
-    # =====================================================
     if start_date or end_date:
-        # Crear columna de fecha como datetime para comparar
         try:
-            # Convertir la fecha del Excel a datetime
             result['fecha_dt'] = pd.to_datetime(result['Fecha'], format='%d/%m/%Y', errors='coerce')
-            
             if start_date:
                 start_dt = datetime.strptime(start_date, "%d/%m/%Y")
                 result = result[result['fecha_dt'] >= start_dt]
-            
             if end_date:
                 end_dt = datetime.strptime(end_date, "%d/%m/%Y")
                 result = result[result['fecha_dt'] <= end_dt]
-            
-            # Eliminar columna temporal
             result = result.drop(columns=['fecha_dt'])
         except Exception as e:
             print(f"Error en filtros de fecha: {e}")
-            # Si falla, intentar comparar como string
             if start_date:
                 result = result[result["Fecha"].astype(str) >= start_date]
             if end_date:
                 result = result[result["Fecha"].astype(str) <= end_date]
-    # =====================================================
     
     if result.empty:
         return jsonify({"error": "No hay tareas en el rango de fechas", "no_tasks": True}), 404
     
-    task_ids = result["task_id"].tolist()
-    pending_tasks = db.get_pending_tasks(supervisor_id, task_ids)
-    
     response_rows = []
     for _, row in result.iterrows():
         task_id = row["task_id"]
-        is_reviewed = task_id not in pending_tasks
-        review = None
-        if is_reviewed:
-            review = db.get_review_status(task_id, supervisor_id)
+        
+        # Obtener URL de la imagen
+        img_url = clean_text(row.get("Img", ""))
+        if not img_url:
+            img_url = clean_text(row.get("TaskImageUrl", ""))
+        
+        # BUSCAR STATUS EN GOOGLE SHEETS (HOJA STATUS)
+        status_sheets = get_status_from_sheets(img_url)
+        
+        if status_sheets:
+            is_reviewed = True
+            review = {
+                "status": status_sheets["status"],
+                "observaciones": status_sheets.get("observaciones", ""),
+                "fecha_revision": status_sheets.get("fecha_revision", "")
+            }
+        else:
+            is_reviewed = False
+            review = None
         
         raw_poc_id = clean_text(row.get("POC ID"))
         short_poc_id = extract_short_poc_id(raw_poc_id)
         client_info = get_client_info(raw_poc_id)
-        
-        img_url = clean_text(row.get("Img", ""))
-        if not img_url:
-            img_url = clean_text(row.get("TaskImageUrl", ""))
         
         response_rows.append({
             "row_id": int(row["row_id"]),
@@ -397,10 +480,6 @@ def api_tasks():
         })
     
     return jsonify(response_rows)
-
-# =====================================================
-# LAS DEMÁS RUTAS (save_review, delete_review, stats, supervisors, export_reviews, close_month)
-# =====================================================
 
 @app.route("/api/save_review", methods=["POST"])
 @login_required
@@ -423,19 +502,22 @@ def api_save_review():
     if task_row.empty:
         return jsonify({"error": "Tarea no encontrada"}), 404
     
-    row_id = int(task_row.iloc[0]["row_id"])
-    supervisor_id = session['supervisor_id']
+    row = task_row.iloc[0]
     supervisor_name = session['supervisor_name']
     
-    success = db.save_review(
-        task_id=task_id,
-        row_id=row_id,
-        supervisor_id=supervisor_id,
-        supervisor_name=supervisor_name,
+    # Obtener datos para guardar en Sheets
+    fecha_tarea = formatear_fecha(row.get("Fecha"))
+    img_url = clean_text(row.get("Img", ""))
+    if not img_url:
+        img_url = clean_text(row.get("TaskImageUrl", ""))
+    
+    # GUARDAR EN GOOGLE SHEETS (hoja Status)
+    success = guardar_status_en_sheets(
+        fecha=fecha_tarea,
+        id_imagen=img_url,
         status=status,
-        observaciones=observaciones,
-        excel_file=_current_excel or "data.xlsx",
-        mes_revision=_current_mes or get_mes_actual()
+        supervisor=supervisor_name,
+        observaciones=observaciones
     )
     
     if success:
@@ -443,305 +525,41 @@ def api_save_review():
     else:
         return jsonify({"error": "Error al guardar la revisión"}), 500
 
-@app.route("/api/delete_review/<task_id>", methods=["DELETE"])
-@login_required
-def api_delete_review(task_id):
-    try:
-        supervisor_id = session.get('supervisor_id')
-        
-        if _cached_df is None or not _data_loaded:
-            return jsonify({"error": "No hay datos cargados"}), 404
-        
-        task_row = _cached_df[_cached_df["task_id"] == task_id]
-        if task_row.empty:
-            return jsonify({"error": "Tarea no encontrada"}), 404
-        
-        success = db.delete_review(task_id, supervisor_id)
-        
-        if success:
-            return jsonify({"ok": True, "message": "Revisión eliminada correctamente"})
-        else:
-            return jsonify({"error": "Error al eliminar la revisión"}), 500
-            
-    except Exception as e:
-        print(f"Error al eliminar revisión: {e}")
-        return jsonify({"error": str(e)}), 500
-
-@app.route("/api/stats")
-@login_required
-def api_stats():
-    global _data_loaded
-    
-    supervisor_id = session['supervisor_id']
-    mes = _current_mes or get_mes_actual()
-    stats = db.get_supervisor_stats(supervisor_id, mes)
-    
-    if not _data_loaded or _cached_df is None:
-        return jsonify({
-            "total_revisados": stats["total"],
-            "total_pendientes": 0,
-            "by_status": stats["by_status"],
-            "porcentaje": 0,
-            "no_data": True
-        })
-    
-    total_disponibles = len(_cached_df[_cached_df["Supervisor ID"] == supervisor_id])
-    task_ids = _cached_df[_cached_df["Supervisor ID"] == supervisor_id]["task_id"].tolist()
-    pending_tasks = db.get_pending_tasks(supervisor_id, task_ids)
-    total_pendientes = len(pending_tasks)
-    
-    return jsonify({
-        "total_revisados": stats["total"],
-        "total_pendientes": total_pendientes,
-        "by_status": stats["by_status"],
-        "porcentaje": round((stats["total"] / total_disponibles * 100) if total_disponibles > 0 else 0, 1),
-        "total_disponibles": total_disponibles,
-        "has_data": True,
-        "mes": mes
-    })
-
 @app.route("/api/supervisors")
 def api_supervisors():
     items = [{"id": sid, "name": name} for sid, name in SUPERVISORS.items()]
     return jsonify(items)
 
-@app.route("/api/export_reviews", methods=["GET"])
-@login_required
-def api_export_reviews():
-    try:
-        supervisor_id = session.get('supervisor_id')
-        supervisor_name = session.get('supervisor_name')
-        mes = _current_mes or get_mes_actual()
-        
-        reviews = db.get_all_reviews(supervisor_id, mes)
-        
-        if not reviews:
-            return jsonify({"error": "No hay revisiones para exportar"}), 404
-        
-        if _cached_df is None or not _data_loaded:
-            export_data = []
-            for review in reviews:
-                export_data.append({
-                    "Fecha Revisión": formatear_fecha_revision(review.get("fecha_revision", "")),
-                    "Fecha Tarea": "",
-                    "POC ID": "",
-                    "Detalle Tarea": "",
-                    "URL Imagen": "",
-                    "ID Tarea": "",
-                    "Razón Social": "",
-                    "Direccion": "",
-                    "Promotor": "",
-                    "Status": review["status"],
-                    "Observaciones": review.get("observaciones", "")
-                })
-            df_export = pd.DataFrame(export_data)
-        else:
-            task_data = {}
-            for _, row in _cached_df.iterrows():
-                raw_poc_id = clean_text(row.get("POC ID", ""))
-                client_info = get_client_info(raw_poc_id) if raw_poc_id else None
-                img_url = clean_text(row.get("Img", ""))
-                if not img_url:
-                    img_url = clean_text(row.get("TaskImageUrl", ""))
-                
-                task_data[row["task_id"]] = {
-                    "fecha_tarea": formatear_fecha(row.get("Fecha")),
-                    "poc_id_completo": raw_poc_id,
-                    "detalle_tarea": row.get("Detalle Tarea", ""),
-                    "imagen": img_url,
-                    "id_tarea": row.get("ID Tarea", ""),  # Campo ID Tarea del Excel
-                    "razon_social": client_info.get("nombre") if client_info else "",
-                    "direccion": client_info.get("direccion") if client_info else "",
-                    "promotor": row.get("Promotor", "")
-                }
-            
-            export_data = []
-            for review in reviews:
-                task_id = review["task_id"]
-                task_info = task_data.get(task_id, {})
-                
-                export_data.append({
-                    "Fecha Revisión": formatear_fecha_revision(review.get("fecha_revision", "")),
-                    "Fecha Tarea": task_info.get("fecha_tarea", ""),
-                    "POC ID": task_info.get("poc_id_completo", ""),
-                    "Detalle Tarea": task_info.get("detalle_tarea", ""),
-                    "URL Imagen": task_info.get("imagen", ""),
-                    "ID Tarea": task_info.get("id_tarea", ""),
-                    "Razón Social": task_info.get("razon_social", ""),
-                    "Direccion": task_info.get("direccion", ""),
-                    "Promotor": task_info.get("promotor", ""),
-                    "Status": review["status"],
-                    "Observaciones": review.get("observaciones", "")
-                })
-            df_export = pd.DataFrame(export_data)
-        
-        output = io.BytesIO()
-        
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            df_export.to_excel(writer, sheet_name='Revisiones', index=False)
-            
-            worksheet = writer.sheets['Revisiones']
-            
-            from openpyxl.styles import PatternFill
-            
-            # === COLOR AZUL CLARO PARA LAS PRIMERAS 6 COLUMNAS (A a F) ===
-            azul_claro = PatternFill(start_color="D4E6F1", end_color="D4E6F1", fill_type="solid")
-            
-            for col_idx in range(0, 6):  # A, B, C, D, E, F
-                for row in range(1, len(df_export) + 2):
-                    cell = worksheet.cell(row=row, column=col_idx + 1)
-                    cell.fill = azul_claro
-            
-            # Ajustar ancho de columnas
-            for column in worksheet.columns:
-                max_length = 0
-                column_letter = column[0].column_letter
-                for cell in column:
-                    try:
-                        if len(str(cell.value)) > max_length:
-                            max_length = len(str(cell.value))
-                    except:
-                        pass
-                adjusted_width = min(max_length + 2, 50)
-                worksheet.column_dimensions[column_letter].width = adjusted_width
-        
-        output.seek(0)
-        filename = f"reporte_revisiones_{supervisor_name}_{mes}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
-        
-        return send_file(
-            output,
-            download_name=filename,
-            as_attachment=True,
-            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-        )
-        
-    except Exception as e:
-        print(f"Error al exportar: {e}")
-        return jsonify({"error": str(e)}), 500
+# =====================================================
+# ENDPOINTS DE PRUEBA
+# =====================================================
 
-@app.route("/api/close_month", methods=["POST"])
+@app.route("/api/test_sheets_status")
 @login_required
-def api_close_month():
-    global _cached_df, _data_loaded
-    
+def test_sheets_status():
+    """Probar conexión a la hoja Status"""
     try:
-        supervisor_id = session.get('supervisor_id')
-        supervisor_name = session.get('supervisor_name')
-        mes = _current_mes or get_mes_actual()
+        gc = get_google_sheet_client()
+        if gc is None:
+            return jsonify({"error": "No se pudo conectar a Google Sheets"}), 500
         
-        reviews = db.get_all_reviews(supervisor_id, mes)
+        sheet = gc.open_by_key(GOOGLE_SHEETS_CONFIG["sheet_id"])
         
-        if not reviews:
-            return jsonify({"error": "No hay revisiones para exportar"}), 404
-        
-        if _cached_df is None or not _data_loaded:
-            export_data = []
-            for review in reviews:
-                export_data.append({
-                    "Fecha Revisión": formatear_fecha_revision(review.get("fecha_revision", "")),
-                    "Fecha Tarea": "",
-                    "POC ID": "",
-                    "Detalle Tarea": "",
-                    "URL Imagen": "",
-                    "ID Tarea": "",
-                    "Razón Social": "",
-                    "Direccion": "",
-                    "Promotor": "",
-                    "Status": review["status"],
-                    "Observaciones": review.get("observaciones", "")
-                })
-            df_export = pd.DataFrame(export_data)
-        else:
-            task_data = {}
-            for _, row in _cached_df.iterrows():
-                raw_poc_id = clean_text(row.get("POC ID", ""))
-                client_info = get_client_info(raw_poc_id) if raw_poc_id else None
-                img_url = clean_text(row.get("Img", ""))
-                if not img_url:
-                    img_url = clean_text(row.get("TaskImageUrl", ""))
-                
-                task_data[row["task_id"]] = {
-                    "fecha_tarea": formatear_fecha(row.get("Fecha")),
-                    "poc_id_completo": raw_poc_id,
-                    "detalle_tarea": row.get("Detalle Tarea", ""),
-                    "imagen": img_url,
-                    "id_tarea": row.get("ID Tarea", ""),
-                    "razon_social": client_info.get("nombre") if client_info else "",
-                    "direccion": client_info.get("direccion") if client_info else "",
-                    "promotor": row.get("Promotor", "")
-                }
-            
-            export_data = []
-            for review in reviews:
-                task_id = review["task_id"]
-                task_info = task_data.get(task_id, {})
-                
-                export_data.append({
-                    "Fecha Revisión": formatear_fecha_revision(review.get("fecha_revision", "")),
-                    "Fecha Tarea": task_info.get("fecha_tarea", ""),
-                    "POC ID": task_info.get("poc_id_completo", ""),
-                    "Detalle Tarea": task_info.get("detalle_tarea", ""),
-                    "URL Imagen": task_info.get("imagen", ""),
-                    "ID Tarea": task_info.get("id_tarea", ""),
-                    "Razón Social": task_info.get("razon_social", ""),
-                    "Direccion": task_info.get("direccion", ""),
-                    "Promotor": task_info.get("promotor", ""),
-                    "Status": review["status"],
-                    "Observaciones": review.get("observaciones", "")
-                })
-            df_export = pd.DataFrame(export_data)
-        
-        output = io.BytesIO()
-        
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            df_export.to_excel(writer, sheet_name='Revisiones Cierre', index=False)
-            
-            worksheet = writer.sheets['Revisiones Cierre']
-            
-            from openpyxl.styles import PatternFill
-            
-            # === COLOR AZUL CLARO PARA LAS PRIMERAS 6 COLUMNAS (A a F) ===
-            azul_claro = PatternFill(start_color="D4E6F1", end_color="D4E6F1", fill_type="solid")
-            
-            for col_idx in range(0, 6):  # A, B, C, D, E, F
-                for row in range(1, len(df_export) + 2):
-                    cell = worksheet.cell(row=row, column=col_idx + 1)
-                    cell.fill = azul_claro
-            
-            # Ajustar ancho de columnas
-            for column in worksheet.columns:
-                max_length = 0
-                column_letter = column[0].column_letter
-                for cell in column:
-                    try:
-                        if len(str(cell.value)) > max_length:
-                            max_length = len(str(cell.value))
-                    except:
-                        pass
-                adjusted_width = min(max_length + 2, 50)
-                worksheet.column_dimensions[column_letter].width = adjusted_width
-        
-        output.seek(0)
-        filename = f"cierre_mes_{supervisor_name}_{mes}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
-        
-        db.clear_reviews(supervisor_id, mes)
-        
-        file_path = UPLOAD_DIR / "data.xlsx"
-        if file_path.exists():
-            file_path.unlink()
-        
-        _cached_df = None
-        _data_loaded = False
-        
-        return send_file(
-            output,
-            download_name=filename,
-            as_attachment=True,
-            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-        )
-        
+        try:
+            worksheet = sheet.worksheet("Status")
+            records = worksheet.get_all_records()
+            return jsonify({
+                "conexion": "OK",
+                "total_registros": len(records),
+                "primeros_5": records[:5] if records else []
+            })
+        except gspread.WorksheetNotFound:
+            return jsonify({
+                "conexion": "OK",
+                "total_registros": 0,
+                "mensaje": "La hoja 'Status' no existe aún. Se creará al guardar la primera revisión."
+            })
     except Exception as e:
-        print(f"Error en cierre de mes: {e}")
         return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
