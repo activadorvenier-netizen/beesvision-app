@@ -1,4 +1,4 @@
-# app.py - VERSIÓN CORREGIDA (SOLO AGREGA GUARDADO EN SHEETS)
+# app.py - VERSIÓN COMPLETA CORREGIDA
 from __future__ import annotations
 from pathlib import Path
 from typing import Any
@@ -12,17 +12,8 @@ from models import ReviewDatabase
 import json
 import re
 import os
-
-# =====================================================
-# IMPORTS PARA GOOGLE SHEETS
-# =====================================================
-try:
-    import gspread
-    from oauth2client.service_account import ServiceAccountCredentials
-    GOOGLE_SHEETS_AVAILABLE = True
-except ImportError:
-    GOOGLE_SHEETS_AVAILABLE = False
-    print("⚠️ gspread no instalado")
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
 
 BASE_DIR = Path(__file__).resolve().parent
 UPLOAD_DIR = BASE_DIR / "uploads"
@@ -79,14 +70,25 @@ CLIENTES = cargar_clientes_json()
 
 def get_google_sheet_client():
     """Obtener conexión a Google Sheets"""
-    if not GOOGLE_SHEETS_AVAILABLE:
-        return None
     try:
+        print(f"🔍 Intentando conectar con credenciales: {GOOGLE_SHEETS_CONFIG['credentials_file']}")
+        
+        if not os.path.exists(GOOGLE_SHEETS_CONFIG["credentials_file"]):
+            print(f"❌ Archivo de credenciales no existe: {GOOGLE_SHEETS_CONFIG['credentials_file']}")
+            if os.path.exists("credentials.json"):
+                GOOGLE_SHEETS_CONFIG["credentials_file"] = "credentials.json"
+                print(f"✅ Usando credentials.json local")
+            else:
+                print(f"❌ No se encuentra credentials.json")
+                return None
+        
         scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
         creds = ServiceAccountCredentials.from_json_keyfile_name(
             GOOGLE_SHEETS_CONFIG["credentials_file"], scope
         )
-        return gspread.authorize(creds)
+        client = gspread.authorize(creds)
+        print("✅ Conexión a Google Sheets exitosa")
+        return client
     except Exception as e:
         print(f"❌ Error al conectar con Google Sheets: {e}")
         return None
@@ -97,6 +99,12 @@ def guardar_status_en_sheets(fecha, id_imagen, status, supervisor, observaciones
     Columnas: Fecha, ID (URL de la imagen), Status, Supervisor, Observaciones, Fecha Revision
     """
     try:
+        print(f"🔍 Intentando guardar en Sheets:")
+        print(f"   - Fecha: {fecha}")
+        print(f"   - ID Imagen: {id_imagen}")
+        print(f"   - Status: {status}")
+        print(f"   - Supervisor: {supervisor}")
+        
         gc = get_google_sheet_client()
         if gc is None:
             print("❌ No se pudo conectar a Google Sheets")
@@ -107,6 +115,7 @@ def guardar_status_en_sheets(fecha, id_imagen, status, supervisor, observaciones
         try:
             worksheet = sheet.worksheet("Status")
         except gspread.WorksheetNotFound:
+            print("🔄 Hoja Status no existe, creando...")
             worksheet = sheet.add_worksheet(title="Status", rows=1000, cols=10)
             worksheet.append_row(["Fecha", "ID", "Status", "Supervisor", "Observaciones", "Fecha Revision"])
         
@@ -426,7 +435,6 @@ def api_tasks():
     end_date = request.args.get("end_date", type=str)
     
     result = _cached_df[_cached_df["Supervisor ID"] == supervisor_id].copy()
-    
     result = result.sort_values(by="Fecha", ascending=True)
     
     if result.empty:
@@ -452,7 +460,6 @@ def api_tasks():
     if result.empty:
         return jsonify({"error": "No hay tareas en el rango de fechas", "no_tasks": True}), 404
     
-    # Obtener status desde Sheets
     response_rows = []
     for _, row in result.iterrows():
         task_id = row["task_id"]
@@ -461,7 +468,6 @@ def api_tasks():
         if not img_url:
             img_url = clean_text(row.get("TaskImageUrl", ""))
         
-        # Buscar en Sheets
         status_sheets = get_status_from_sheets(img_url)
         
         if status_sheets:
@@ -499,10 +505,6 @@ def api_tasks():
     
     return jsonify(response_rows)
 
-# =====================================================
-# GUARDAR REVISIÓN
-# =====================================================
-
 @app.route("/api/save_review", methods=["POST"])
 @login_required
 def api_save_review():
@@ -529,7 +531,6 @@ def api_save_review():
     supervisor_id = session['supervisor_id']
     supervisor_name = session['supervisor_name']
     
-    # Obtener datos para guardar en Sheets
     fecha_tarea = formatear_fecha(row.get("Fecha"))
     img_url = clean_text(row.get("Img", ""))
     if not img_url:
