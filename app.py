@@ -503,5 +503,39 @@ def debug():
         "primeras_filas": _cached_df.head(3).to_dict('records') if len(_cached_df) > 0 else []
     })
 
+@app.route("/api/debug")
+@login_required
+def debug():
+    try:
+        global _cached_df, _data_loaded
+        
+        if not _data_loaded or _cached_df is None:
+            return jsonify({"error": "No hay datos cargados"})
+        
+        supervisor_id = session.get('supervisor_id')
+        supervisor_name = session.get('supervisor_name')
+        
+        resultado = {
+            "supervisor_id": supervisor_id,
+            "supervisor_name": supervisor_name,
+            "total_filas": len(_cached_df),
+            "columnas": _cached_df.columns.tolist(),
+            "supervisores_en_excel": _cached_df["Supervisor ID"].unique().tolist() if "Supervisor ID" in _cached_df.columns else []
+        }
+        
+        if "Supervisor ID" in _cached_df.columns:
+            tareas_supervisor = _cached_df[_cached_df["Supervisor ID"] == supervisor_id]
+            resultado["tareas_supervisor"] = len(tareas_supervisor)
+            if len(tareas_supervisor) > 0:
+                resultado["primeras_filas"] = tareas_supervisor.head(2).to_dict('records')
+        
+        return jsonify(resultado)
+    except Exception as e:
+        import traceback
+        return jsonify({
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }), 500
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
