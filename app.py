@@ -1,4 +1,4 @@
-# app.py - VERSIÓN DEFINITIVA (SOLO SHEETS, SIN models.py)
+# app.py - VERSIÓN FINAL QUE FUNCIONA
 from __future__ import annotations
 from pathlib import Path
 from typing import Any
@@ -193,18 +193,10 @@ def login_required(f):
 
 def _load_data(path: Path) -> pd.DataFrame:
     df = pd.read_excel(path, engine="openpyxl")
-    
     if "TaskImageUrl" in df.columns and "Img" not in df.columns:
         df = df.rename(columns={"TaskImageUrl": "Img"})
     if "Img" not in df.columns:
         df["Img"] = ""
-    
-    # Eliminar filas con valores nulos en columnas críticas
-    df = df.dropna(subset=["Fecha", "POC ID", "Supervisor ID"])
-    
-    # Convertir Supervisor ID a número
-    df["Supervisor ID"] = pd.to_numeric(df["Supervisor ID"], errors="coerce")
-    
     return df
 
 # =====================================================
@@ -259,7 +251,6 @@ def api_upload():
 @login_required
 def api_tasks():
     global _cached_df, _data_loaded
-    
     if not _data_loaded or _cached_df is None or _cached_df.empty:
         return jsonify({"error": "No hay datos cargados. Sube un archivo Excel.", "no_data": True}), 404
     
@@ -267,18 +258,18 @@ def api_tasks():
     start_date = request.args.get("start_date", type=str)
     end_date = request.args.get("end_date", type=str)
     
-    # Filtrar por supervisor
     result = _cached_df[_cached_df["Supervisor ID"] == supervisor_id]
-    
     if result.empty:
         return jsonify({"error": "No hay tareas para este supervisor", "no_tasks": True}), 404
     
-    if start_date:
+    result = result.sort_values(by="Fecha", ascending=True)
+    
+    if start_date and start_date.strip():
         try:
             result = result[result["Fecha"].astype(str) >= start_date]
         except:
             pass
-    if end_date:
+    if end_date and end_date.strip():
         try:
             result = result[result["Fecha"].astype(str) <= end_date]
         except:
@@ -442,19 +433,6 @@ def api_export_reviews():
         return send_file(output, download_name=filename, as_attachment=True, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
-@app.route("/api/status")
-@login_required
-def status():
-    global _cached_df, _data_loaded
-    if not _data_loaded or _cached_df is None:
-        return jsonify({"error": "No hay datos"})
-    return jsonify({
-        "filas": len(_cached_df),
-        "columnas": _cached_df.columns.tolist(),
-        "supervisor_id": session.get('supervisor_id'),
-        "tareas_supervisor": len(_cached_df[_cached_df["Supervisor ID"] == session.get('supervisor_id')])
-    })
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
