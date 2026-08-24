@@ -1,4 +1,4 @@
-# app.py - VERSIÓN SIMPLE Y DEFINITIVA
+# app.py - VERSIÓN FINAL QUE FUNCIONA
 from __future__ import annotations
 from pathlib import Path
 from typing import Any
@@ -35,6 +35,9 @@ SUPERVISORS = {
 
 app = Flask(__name__)
 app.secret_key = "clave_secreta_para_desarrollo"
+
+_cached_df = None
+_data_loaded = False
 
 # =====================================================
 # CONFIGURACIÓN GOOGLE SHEETS
@@ -251,14 +254,11 @@ def api_upload():
     try:
         df = pd.read_excel(file_path, engine="openpyxl")
         
-        # Renombrar columnas
         if "TaskImageUrl" in df.columns and "Img" not in df.columns:
             df = df.rename(columns={"TaskImageUrl": "Img"})
-        
         if "Img" not in df.columns:
             df["Img"] = ""
         
-        # Guardar en variable global
         _cached_df = df
         _data_loaded = True
         
@@ -278,17 +278,14 @@ def api_tasks():
     start_date = request.args.get("start_date", type=str)
     end_date = request.args.get("end_date", type=str)
     
-    # Filtrar por supervisor
     result = _cached_df[_cached_df["Supervisor ID"] == supervisor_id].copy()
     
     if result.empty:
         return jsonify({"error": f"No hay tareas para este supervisor", "no_tasks": True}), 404
     
-    # Ordenar por fecha
     if 'Fecha' in result.columns:
         result = result.sort_values(by="Fecha", ascending=True)
     
-    # Filtros de fecha
     if start_date:
         try:
             result = result[result["Fecha"].astype(str) >= start_date]
@@ -305,16 +302,14 @@ def api_tasks():
     
     response = []
     for idx, row in result.iterrows():
-        task_id = f"task_{idx}"
         img_url = clean_text(row.get("Img", ""))
         poc_id = clean_text(row.get("POC ID", ""))
         
-        # Buscar status en Sheets
         status_info = get_status_from_sheets(img_url) if img_url else None
         
         response.append({
             "row_id": idx,
-            "task_id": task_id,
+            "task_id": f"task_{idx}",
             "fecha": formatear_fecha(row.get("Fecha")),
             "promotor": clean_text(row.get("Promotor")),
             "poc_id": extract_short_poc_id(poc_id),
@@ -349,7 +344,6 @@ def api_save_review():
     if not _data_loaded or _cached_df is None:
         return jsonify({"error": "No hay datos cargados"}), 404
     
-    # Obtener índice de la tarea
     try:
         idx = int(task_id.split("_")[1])
     except:
@@ -378,7 +372,6 @@ def api_stats():
     supervisor_name = session['supervisor_name']
     supervisor_id = session['supervisor_id']
     
-    # Estadísticas desde Sheets
     stats = {"total": 0, "by_status": {"objeccion": 0, "invalida": 0, "fraude": 0}}
     
     try:
@@ -429,10 +422,8 @@ def api_supervisors():
 @login_required
 def api_export_reviews():
     try:
-        supervisor_id = session.get('supervisor_id')
         supervisor_name = session.get('supervisor_name')
         
-        # Obtener revisiones desde Sheets
         gc = get_google_sheet_client()
         if gc is None:
             return jsonify({"error": "No se pudo conectar a Google Sheets"}), 500
@@ -444,7 +435,6 @@ def api_export_reviews():
         except:
             return jsonify({"error": "No hay revisiones para exportar"}), 404
         
-        # Filtrar por supervisor
         revisiones = []
         for row in records:
             if row.get("Supervisor") == supervisor_name:
@@ -453,7 +443,6 @@ def api_export_reviews():
         if not revisiones:
             return jsonify({"error": "No hay revisiones para exportar"}), 404
         
-        # Generar Excel
         export_data = []
         for rev in revisiones:
             export_data.append({
@@ -488,24 +477,6 @@ def api_export_reviews():
 @app.route("/api/debug")
 @login_required
 def debug():
-    global _cached_df, _data_loaded
-    
-    if not _data_loaded or _cached_df is None:
-        return jsonify({"error": "No hay datos"})
-    
-    supervisor_id = session.get('supervisor_id')
-    
-    return jsonify({
-        "supervisor_id": supervisor_id,
-        "supervisores_en_excel": _cached_df["Supervisor ID"].unique().tolist() if "Supervisor ID" in _cached_df.columns else [],
-        "total_filas": len(_cached_df),
-        "columnas": _cached_df.columns.tolist(),
-        "primeras_filas": _cached_df.head(3).to_dict('records') if len(_cached_df) > 0 else []
-    })
-
-@app.route("/api/debug")
-@login_required
-def debug():
     try:
         global _cached_df, _data_loaded
         
@@ -513,29 +484,21 @@ def debug():
             return jsonify({"error": "No hay datos cargados"})
         
         supervisor_id = session.get('supervisor_id')
-        supervisor_name = session.get('supervisor_name')
         
         resultado = {
             "supervisor_id": supervisor_id,
-            "supervisor_name": supervisor_name,
             "total_filas": len(_cached_df),
             "columnas": _cached_df.columns.tolist(),
             "supervisores_en_excel": _cached_df["Supervisor ID"].unique().tolist() if "Supervisor ID" in _cached_df.columns else []
         }
         
         if "Supervisor ID" in _cached_df.columns:
-            tareas_supervisor = _cached_df[_cached_df["Supervisor ID"] == supervisor_id]
-            resultado["tareas_supervisor"] = len(tareas_supervisor)
-            if len(tareas_supervisor) > 0:
-                resultado["primeras_filas"] = tareas_supervisor.head(2).to_dict('records')
+            tareas = _cached_df[_cached_df["Supervisor ID"] == supervisor_id]
+            resultado["tareas_supervisor"] = len(tareas)
         
         return jsonify(resultado)
     except Exception as e:
-        import traceback
-        return jsonify({
-            "error": str(e),
-            "traceback": traceback.format_exc()
-        }), 500
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
