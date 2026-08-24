@@ -155,8 +155,10 @@ def _is_visita_valida(value: Any) -> bool:
         return float(value) == 1.0
     if isinstance(value, bool):
         return value
-    text = str(value).strip().upper()
-    return text in {"VERDADERO", "TRUE", "1", "1.0", "SI", "YES"}
+    if isinstance(value, str):
+        text = value.strip().upper()
+        return text in {"VERDADERO", "TRUE", "1", "1.0", "SI", "YES", "VERDADERO", "V"}
+    return False
 
 def extract_short_poc_id(poc_id):
     if not poc_id:
@@ -229,27 +231,43 @@ def _load_data(path: Path) -> pd.DataFrame:
     df = pd.read_excel(path, engine="openpyxl")
     _current_excel = path.name
     _current_mes = get_mes_actual()
+    
+    print(f"📂 Archivo cargado: {len(df)} filas")
+    print(f"📊 Columnas: {df.columns.tolist()}")
+    
     if "TaskImageUrl" in df.columns and "Img" not in df.columns:
         df = df.rename(columns={"TaskImageUrl": "Img"})
     if "Img" not in df.columns:
         df["Img"] = ""
+    
     required = ["Fecha", "Promotor", "POC ID", "Detalle Tarea", "Completada", "Validada", "Visita Valida", "Supervisor ID"]
     missing = [c for c in required if c not in df.columns]
     if missing:
         raise ValueError(f"Columnas faltantes: {missing}")
+    
     df = df.copy()
     df["Completada"] = pd.to_numeric(df["Completada"], errors="coerce")
     df["Validada"] = pd.to_numeric(df["Validada"], errors="coerce")
     df["Supervisor ID"] = pd.to_numeric(df["Supervisor ID"], errors="coerce").astype("Int64")
     df["VisitaValidaBool"] = df["Visita Valida"].apply(_is_visita_valida)
+    
+    print(f"📊 Completada == 1: {len(df[df['Completada'] == 1.0])}")
+    print(f"📊 Validada == 0: {len(df[df['Validada'] == 0.0])}")
+    print(f"📊 VisitaValidaBool True: {len(df[df['VisitaValidaBool']])}")
+    
     filtered = df[
         (df["Completada"] == 1.0) &
         (df["Validada"] == 0.0) &
         (df["VisitaValidaBool"])
     ].copy()
+    
+    print(f"📊 Después de filtros: {len(filtered)} filas")
+    
     if 'supervisor_id' in session:
         supervisor_id = session['supervisor_id']
         filtered = filtered[filtered["Supervisor ID"] == supervisor_id]
+        print(f"📊 Después de filtro por supervisor {supervisor_id}: {len(filtered)} filas")
+    
     filtered = filtered.reset_index(drop=True)
     filtered["row_id"] = range(1, len(filtered) + 1)
     filtered["task_id"] = filtered.apply(_build_task_id, axis=1)
@@ -309,55 +327,25 @@ def api_upload():
 @login_required
 def api_tasks():
     global _cached_df, _data_loaded
+    
+    print(f"🔍 api_tasks - _data_loaded: {_data_loaded}")
+    print(f"🔍 api_tasks - _cached_df is None: {_cached_df is None}")
+    
     if not _data_loaded or _cached_df is None or _cached_df.empty:
         return jsonify({"error": "No hay datos cargados. Sube un archivo Excel.", "no_data": True}), 404
     
     supervisor_id = session['supervisor_id']
-    start_date = request.args.get("start_date", type=str)
-    end_date = request.args.get("end_date", type=str)
-    
     result = _cached_df[_cached_df["Supervisor ID"] == supervisor_id].copy()
+    
+    print(f"🔍 result vacío: {result.empty}")
+    
     if result.empty:
         return jsonify({"error": f"No hay tareas asignadas para {SUPERVISORS[supervisor_id]}", "no_tasks": True}), 404
     
-    result = result.sort_values(by="Fecha", ascending=True)
-    
-    if start_date and start_date.strip():
-        try:
-            result = result[result["Fecha"].astype(str) >= start_date]
-        except:
-            pass
-    if end_date and end_date.strip():
-        try:
-            result = result[result["Fecha"].astype(str) <= end_date]
-        except:
-            pass
-    
-    if result.empty:
-        return jsonify({"error": "No hay tareas en el rango de fechas", "no_tasks": True}), 404
-    
     response_rows = []
     for _, row in result.iterrows():
-        task_id = row["task_id"]
-        is_reviewed = False
-        review = None
-        
         id_tarea = clean_text(row.get("ID Tarea", ""))
-        if id_tarea:
-            try:
-                status_sheets = get_status_from_sheets(id_tarea)
-                if status_sheets:
-                    is_reviewed = True
-                    review = status_sheets
-            except:
-                pass
-        
-        if not is_reviewed:
-            task_ids = result["task_id"].tolist()
-            pending_tasks = db.get_pending_tasks(supervisor_id, task_ids)
-            is_reviewed = task_id not in pending_tasks
-            if is_reviewed:
-                review = db.get_review_status(task_id, supervisor_id)
+        status_sheets = get_status_from_sheets(id_tarea) if id_tarea else None
         
         raw_poc_id = clean_text(row.get("POC ID"))
         short_poc_id = extract_short_poc_id(raw_poc_id)
@@ -368,7 +356,7 @@ def api_tasks():
         
         response_rows.append({
             "row_id": int(row["row_id"]),
-            "task_id": task_id,
+            "task_id": row["task_id"],
             "fecha": formatear_fecha(row.get("Fecha")),
             "promotor": clean_text(row.get("Promotor")),
             "poc_id": short_poc_id,
@@ -378,10 +366,10 @@ def api_tasks():
             "direccion": client_info.get("direccion") if client_info else "SIN DATO",
             "detalle_tarea": clean_text(row.get("Detalle Tarea")),
             "imagen": img_url,
-            "revisado": is_reviewed,
-            "status": review.get("status") if review else None,
-            "observaciones": review.get("observaciones") if review else "",
-            "fecha_revision": review.get("fecha_revision") if review else None
+            "revisado": status_sheets is not None,
+            "status": status_sheets.get("status") if status_sheets else None,
+            "observaciones": status_sheets.get("observaciones") if status_sheets else "",
+            "fecha_revision": status_sheets.get("fecha_revision") if status_sheets else None
         })
     
     return jsonify(response_rows)
