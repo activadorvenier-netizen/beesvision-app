@@ -254,78 +254,60 @@ def api_upload():
     try:
         df = pd.read_excel(file_path, engine="openpyxl")
         
-        if "TaskImageUrl" in df.columns and "Img" not in df.columns:
-            df = df.rename(columns={"TaskImageUrl": "Img"})
-        if "Img" not in df.columns:
-            df["Img"] = ""
-        
+        # Guardar en variable global
         _cached_df = df
         _data_loaded = True
         
+        print(f"✅ Archivo cargado: {len(df)} filas")
+        print(f"📊 Columnas: {df.columns.tolist()}")
+        
         return jsonify({"ok": True, "rows": len(df), "message": f"Archivo cargado con {len(df)} registros"})
     except Exception as e:
+        print(f"❌ Error: {e}")
         return jsonify({"error": str(e)}), 500
 
-@app.route("/api/tasks")
+@app.route("/api/test_tasks")
 @login_required
-def api_tasks():
+def test_tasks():
+    """Versión de prueba que devuelve datos SIMPLES"""
     global _cached_df, _data_loaded
     
+    print(f"🔍 test_tasks - _data_loaded: {_data_loaded}")
+    print(f"🔍 test_tasks - _cached_df is None: {_cached_df is None}")
+    
     if not _data_loaded or _cached_df is None:
-        return jsonify({"error": "No hay datos cargados. Sube un archivo Excel.", "no_data": True}), 404
+        return jsonify({"error": "No hay datos cargados"})
     
-    supervisor_id = session['supervisor_id']
-    start_date = request.args.get("start_date", type=str)
-    end_date = request.args.get("end_date", type=str)
+    supervisor_id = session.get('supervisor_id')
     
-    result = _cached_df[_cached_df["Supervisor ID"] == supervisor_id].copy()
+    print(f"👤 Supervisor ID: {supervisor_id}")
+    print(f"📊 Columnas: {_cached_df.columns.tolist()}")
     
-    if result.empty:
-        return jsonify({"error": f"No hay tareas para este supervisor", "no_tasks": True}), 404
+    # Filtrar
+    if "Supervisor ID" in _cached_df.columns:
+        df_filtrado = _cached_df[_cached_df["Supervisor ID"] == supervisor_id]
+    else:
+        df_filtrado = _cached_df
     
-    if 'Fecha' in result.columns:
-        result = result.sort_values(by="Fecha", ascending=True)
+    if df_filtrado.empty:
+        return jsonify({"error": "No hay tareas para este supervisor"})
     
-    if start_date:
-        try:
-            result = result[result["Fecha"].astype(str) >= start_date]
-        except:
-            pass
-    if end_date:
-        try:
-            result = result[result["Fecha"].astype(str) <= end_date]
-        except:
-            pass
-    
-    if result.empty:
-        return jsonify({"error": "No hay tareas en el rango de fechas", "no_tasks": True}), 404
-    
-    response = []
-    for idx, row in result.iterrows():
-        img_url = clean_text(row.get("Img", ""))
-        poc_id = clean_text(row.get("POC ID", ""))
-        
-        status_info = get_status_from_sheets(img_url) if img_url else None
-        
-        response.append({
-            "row_id": idx,
-            "task_id": f"task_{idx}",
-            "fecha": formatear_fecha(row.get("Fecha")),
-            "promotor": clean_text(row.get("Promotor")),
-            "poc_id": extract_short_poc_id(poc_id),
-            "poc_id_completo": poc_id,
-            "cliente_id": extract_short_poc_id(poc_id),
-            "razon_social": get_client_info(poc_id).get("nombre") if get_client_info(poc_id) else "SIN DATO",
-            "direccion": get_client_info(poc_id).get("direccion") if get_client_info(poc_id) else "SIN DATO",
-            "detalle_tarea": clean_text(row.get("Detalle Tarea")),
-            "imagen": img_url,
-            "revisado": status_info is not None,
-            "status": status_info.get("status") if status_info else None,
-            "observaciones": status_info.get("observaciones") if status_info else "",
-            "fecha_revision": status_info.get("fecha_revision") if status_info else None
+    # Devolver SOLO 5 tareas con datos mínimos
+    resultado = []
+    for idx, row in df_filtrado.head(5).iterrows():
+        resultado.append({
+            "index": idx,
+            "fecha": str(row.get("Fecha", "")),
+            "promotor": str(row.get("Promotor", "")),
+            "poc_id": str(row.get("POC ID", "")),
+            "imagen": str(row.get("Img", row.get("TaskImageUrl", "")))
         })
     
-    return jsonify(response)
+    return jsonify({
+        "total": len(df_filtrado),
+        "mostrando": len(resultado),
+        "tareas": resultado
+    })
 
 @app.route("/api/save_review", methods=["POST"])
 @login_required
@@ -535,6 +517,16 @@ def test_tasks():
         "total": len(df_filtrado),
         "mostrando": len(resultado),
         "tareas": resultado
+    })
+
+@app.route("/api/estado")
+@login_required
+def estado():
+    global _cached_df, _data_loaded
+    return jsonify({
+        "data_loaded": _data_loaded,
+        "cached_df_is_none": _cached_df is None,
+        "cached_df_rows": len(_cached_df) if _cached_df is not None else 0
     })
 
 if __name__ == "__main__":
