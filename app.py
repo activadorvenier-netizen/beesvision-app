@@ -1,36 +1,30 @@
-# app.py - VERSIÓN DEFINITIVA CON ARCHIVO EN UPLOADS
+# app.py - SOLUCIÓN DEFINITIVA
 from __future__ import annotations
 from pathlib import Path
 from typing import Any
 import pandas as pd
-from flask import Flask, jsonify, render_template, request, session, send_file
+from flask import Flask, jsonify, render_template, request, session
 from functools import wraps
 import hashlib
 from datetime import datetime
-import io
-from models import ReviewDatabase
 import json
 import re
 import os
 from tempfile import NamedTemporaryFile
 
 # =====================================================
-# IMPORTS PARA GOOGLE SHEETS
+# IMPORTS GOOGLE SHEETS
 # =====================================================
 try:
     import gspread
     from oauth2client.service_account import ServiceAccountCredentials
     GOOGLE_SHEETS_AVAILABLE = True
-    print("✅ gspread importado correctamente")
-except ImportError as e:
+except ImportError:
     GOOGLE_SHEETS_AVAILABLE = False
-    print(f"⚠️ gspread no instalado: {e}")
 
 BASE_DIR = Path(__file__).resolve().parent
 UPLOAD_DIR = BASE_DIR / "uploads"
 UPLOAD_DIR.mkdir(exist_ok=True)
-
-db = ReviewDatabase()
 
 SUPERVISORS = {
     14: "Bruno Del Popolo",
@@ -41,12 +35,8 @@ SUPERVISORS = {
 app = Flask(__name__)
 app.secret_key = "clave_secreta_para_desarrollo"
 
-_cached_df = None
-_data_loaded = False
-_current_mes = None
-
 # =====================================================
-# CONFIGURACIÓN DE GOOGLE SHEETS
+# CONFIGURACIÓN GOOGLE SHEETS
 # =====================================================
 
 GOOGLE_CREDENTIALS_JSON = os.environ.get("GOOGLE_CREDENTIALS")
@@ -61,14 +51,8 @@ if GOOGLE_CREDENTIALS_JSON:
         json.dump(creds_data, temp_creds)
         temp_creds.close()
         CREDENTIALS_FILE = temp_creds.name
-        print("✅ Credenciales cargadas desde variable de entorno")
-    except Exception as e:
-        print(f"❌ Error al procesar credenciales: {e}")
-        CREDENTIALS_FILE = "credentials.json"
-else:
-    if os.path.exists("credentials.json"):
-        CREDENTIALS_FILE = "credentials.json"
-        print("✅ Usando credentials.json local")
+    except:
+        pass
 
 GOOGLE_SHEETS_CONFIG = {
     "sheet_id": SHEET_ID,
@@ -77,7 +61,7 @@ GOOGLE_SHEETS_CONFIG = {
 }
 
 # =====================================================
-# CARGAR CLIENTES DESDE JSON
+# CLIENTES DESDE JSON
 # =====================================================
 
 def cargar_clientes_json():
@@ -85,55 +69,42 @@ def cargar_clientes_json():
         json_path = BASE_DIR / "clientes.json"
         if json_path.exists():
             with open(json_path, 'r', encoding='utf-8') as f:
-                clientes = json.load(f)
-            print(f"✅ Clientes cargados desde JSON: {len(clientes)}")
-            return clientes
-    except Exception as e:
-        print(f"❌ Error cargando JSON: {e}")
+                return json.load(f)
+    except:
+        pass
     return {}
 
 CLIENTES = cargar_clientes_json()
 
 # =====================================================
-# FUNCIONES PARA GOOGLE SHEETS
+# FUNCIONES GOOGLE SHEETS
 # =====================================================
 
 def get_google_sheet_client():
     if not GOOGLE_SHEETS_AVAILABLE:
-        print("❌ gspread no disponible")
         return None
-    
     try:
-        creds_file = GOOGLE_SHEETS_CONFIG["credentials_file"]
-        print(f"🔍 Intentando conectar con credenciales: {creds_file}")
-        
-        if not os.path.exists(creds_file):
-            print(f"❌ Archivo de credenciales no existe: {creds_file}")
+        if not os.path.exists(GOOGLE_SHEETS_CONFIG["credentials_file"]):
             return None
-        
         scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-        creds = ServiceAccountCredentials.from_json_keyfile_name(creds_file, scope)
-        client = gspread.authorize(creds)
-        print("✅ Conexión a Google Sheets exitosa")
-        return client
-    except Exception as e:
-        print(f"❌ Error al conectar con Google Sheets: {e}")
+        creds = ServiceAccountCredentials.from_json_keyfile_name(
+            GOOGLE_SHEETS_CONFIG["credentials_file"], scope
+        )
+        return gspread.authorize(creds)
+    except:
         return None
 
 def guardar_status_en_sheets(fecha, id_imagen, status, supervisor, observaciones=""):
     try:
-        print(f"🔍 Guardando en Sheets: {id_imagen} -> {status}")
-        
         gc = get_google_sheet_client()
         if gc is None:
-            print("❌ No se pudo conectar a Google Sheets")
             return False
         
         sheet = gc.open_by_key(GOOGLE_SHEETS_CONFIG["sheet_id"])
         
         try:
             worksheet = sheet.worksheet("Status")
-        except gspread.WorksheetNotFound:
+        except:
             worksheet = sheet.add_worksheet(title="Status", rows=1000, cols=10)
             worksheet.append_row(["Fecha", "ID", "Status", "Supervisor", "Observaciones", "Fecha Revision"])
         
@@ -146,14 +117,11 @@ def guardar_status_en_sheets(fecha, id_imagen, status, supervisor, observaciones
         
         if row_to_update:
             worksheet.update(f'C{row_to_update}:F{row_to_update}', [[status, supervisor, observaciones, fecha_revision]])
-            print(f"✅ Status actualizado en Sheets: {id_imagen} -> {status}")
         else:
             worksheet.append_row([fecha, id_imagen, status, supervisor, observaciones, fecha_revision])
-            print(f"✅ Status guardado en Sheets: {id_imagen} -> {status}")
         
         return True
-    except Exception as e:
-        print(f"❌ Error al guardar en Sheets: {e}")
+    except:
         return False
 
 def get_status_from_sheets(id_imagen):
@@ -166,7 +134,7 @@ def get_status_from_sheets(id_imagen):
         
         try:
             worksheet = sheet.worksheet("Status")
-        except gspread.WorksheetNotFound:
+        except:
             return None
         
         id_column = worksheet.col_values(2)
@@ -180,12 +148,11 @@ def get_status_from_sheets(id_imagen):
                 "fecha_revision": row_data[5] if len(row_data) > 5 else None
             }
         return None
-    except Exception as e:
-        print(f"❌ Error al leer status desde Sheets: {e}")
+    except:
         return None
 
 # =====================================================
-# FUNCIONES
+# FUNCIONES BASE
 # =====================================================
 
 def clean_text(value: Any) -> str:
@@ -193,46 +160,42 @@ def clean_text(value: Any) -> str:
         return ""
     return str(value).strip()
 
-def _is_visita_valida(value: Any) -> bool:
-    if pd.isna(value):
-        return False
-    if isinstance(value, (int, float)):
-        return float(value) == 1.0
-    if isinstance(value, bool):
-        return value
-    text = str(value).strip().upper()
-    return text in {"VERDADERO", "TRUE", "1", "1.0", "SI", "YES"}
-
 def extract_short_poc_id(poc_id):
     if not poc_id:
         return ""
-    
     poc_id = str(poc_id).strip()
     if poc_id.endswith('.0'):
         poc_id = poc_id[:-2]
     poc_id = poc_id.replace('-', '').replace(' ', '')
-    
     if poc_id.startswith("053822"):
-        resultado = poc_id[6:].lstrip('0')
-        return resultado if resultado else "0"
+        return poc_id[6:].lstrip('0') or "0"
     if poc_id.startswith("53822"):
-        resultado = poc_id[5:].lstrip('0')
-        return resultado if resultado else "0"
-    
+        return poc_id[5:].lstrip('0') or "0"
     return poc_id.lstrip('0') or "0"
 
 def get_client_info(poc_id):
     if not poc_id:
         return None
-    
     short_id = extract_short_poc_id(poc_id)
-    if not short_id or short_id == "0":
-        return None
-    
     if short_id in CLIENTES:
         return CLIENTES[short_id]
-    
     return None
+
+def formatear_fecha(fecha_valor):
+    if pd.isna(fecha_valor):
+        return ""
+    if isinstance(fecha_valor, (datetime, pd.Timestamp)):
+        return fecha_valor.strftime("%d/%m/%Y")
+    fecha_str = str(fecha_valor).strip()
+    if '/' in fecha_str:
+        return fecha_str
+    if '-' in fecha_str:
+        partes = fecha_str.split('-')
+        if len(partes) == 3:
+            return f"{partes[2].split(' ')[0]}/{partes[1]}/{partes[0]}"
+    if len(fecha_str) >= 8 and fecha_str[:8].isdigit():
+        return f"{fecha_str[6:8]}/{fecha_str[4:6]}/{fecha_str[0:4]}"
+    return fecha_str
 
 def login_required(f):
     @wraps(f)
@@ -242,105 +205,8 @@ def login_required(f):
         return f(*args, **kwargs)
     return decorated_function
 
-def _build_task_id(row: pd.Series) -> str:
-    poc_id = clean_text(row.get("POC ID", ""))
-    fecha = str(row.get("Fecha", ""))
-    detalle = clean_text(row.get("Detalle Tarea", ""))
-    raw = f"{poc_id}|{fecha}|{detalle}"
-    return hashlib.md5(raw.encode()).hexdigest()[:12]
-
-def get_mes_actual():
-    return datetime.now().strftime("%Y%m")
-
-def formatear_fecha(fecha_valor):
-    if pd.isna(fecha_valor):
-        return ""
-    
-    if isinstance(fecha_valor, (datetime, pd.Timestamp)):
-        return fecha_valor.strftime("%d/%m/%Y")
-    
-    fecha_str = str(fecha_valor).strip()
-    
-    if '/' in fecha_str:
-        return fecha_str
-    
-    if '-' in fecha_str:
-        partes = fecha_str.split('-')
-        if len(partes) == 3:
-            año = partes[0]
-            mes = partes[1]
-            dia = partes[2].split(' ')[0]
-            return f"{dia}/{mes}/{año}"
-    
-    if len(fecha_str) >= 8 and fecha_str[:8].isdigit():
-        año = fecha_str[0:4]
-        mes = fecha_str[4:6]
-        dia = fecha_str[6:8]
-        return f"{dia}/{mes}/{año}"
-    
-    return fecha_str
-
-def _load_data(path: Path) -> pd.DataFrame:
-    df = pd.read_excel(path, engine="openpyxl")
-    
-    # Mapeo flexible de columnas
-    if "TaskImageUrl" in df.columns and "Img" not in df.columns:
-        df = df.rename(columns={"TaskImageUrl": "Img"})
-    
-    # Verificar columnas requeridas
-    required = ["Fecha", "Promotor", "POC ID", "Detalle Tarea", "Completada", "Validada", "Visita Valida", "Supervisor ID"]
-    
-    # Si no existe 'Img', crearla vacía
-    if "Img" not in df.columns:
-        df["Img"] = ""
-        print("⚠️ Columna 'Img' no encontrada, creada vacía")
-    
-    missing = [c for c in required if c not in df.columns]
-    if missing:
-        raise ValueError(f"Columnas faltantes: {missing}")
-    
-    df = df.copy()
-    
-    # Convertir columnas a numérico
-    df["Completada"] = pd.to_numeric(df["Completada"], errors="coerce")
-    df["Validada"] = pd.to_numeric(df["Validada"], errors="coerce")
-    df["Supervisor ID"] = pd.to_numeric(df["Supervisor ID"], errors="coerce").astype("Int64")
-    
-    # Convertir Visita Valida (manejar diferentes formatos)
-    def convertir_visita_valida(valor):
-        if pd.isna(valor):
-            return False
-        if isinstance(valor, (int, float)):
-            return float(valor) == 1.0
-        if isinstance(valor, bool):
-            return valor
-        if isinstance(valor, str):
-            return valor.strip().upper() in {"VERDADERO", "TRUE", "1", "SI", "YES"}
-        return False
-    
-    df["VisitaValidaBool"] = df["Visita Valida"].apply(convertir_visita_valida)
-    
-    # Aplicar filtros
-    filtered = df[
-        (df["Completada"] == 1.0) &
-        (df["Validada"] == 0.0) &
-        (df["VisitaValidaBool"])
-    ].copy()
-    
-    if 'supervisor_id' in session:
-        supervisor_id = session['supervisor_id']
-        filtered = filtered[filtered["Supervisor ID"] == supervisor_id]
-    
-    filtered = filtered.reset_index(drop=True)
-    filtered["row_id"] = range(1, len(filtered) + 1)
-    filtered["task_id"] = filtered.apply(_build_task_id, axis=1)
-    
-    print(f"📊 Total tareas: {len(filtered)}")
-    
-    return filtered
-
 # =====================================================
-# ROUTES
+# RUTAS
 # =====================================================
 
 @app.route("/")
@@ -351,18 +217,11 @@ def index():
 def api_login():
     data = request.json
     supervisor_id = data.get("supervisor_id")
-    
     if supervisor_id not in SUPERVISORS:
         return jsonify({"error": "Supervisor no encontrado"}), 404
-    
     session['supervisor_id'] = supervisor_id
     session['supervisor_name'] = SUPERVISORS[supervisor_id]
-    
-    return jsonify({
-        "ok": True,
-        "supervisor_id": supervisor_id,
-        "supervisor_name": SUPERVISORS[supervisor_id]
-    })
+    return jsonify({"ok": True, "supervisor_id": supervisor_id, "supervisor_name": SUPERVISORS[supervisor_id]})
 
 @app.route("/api/logout", methods=["POST"])
 def api_logout():
@@ -372,157 +231,86 @@ def api_logout():
 @app.route("/api/has_file")
 @login_required
 def api_has_file():
-    global _data_loaded
     file_exists = (UPLOAD_DIR / "data.xlsx").exists()
-    return jsonify({
-        "has_file": file_exists and _data_loaded,
-        "file_exists": file_exists,
-        "data_loaded": _data_loaded,
-        "mes_actual": _current_mes
-    })
+    return jsonify({"has_file": file_exists, "file_exists": file_exists})
 
 @app.route("/api/upload", methods=["POST"])
 @login_required
 def api_upload():
-    global _cached_df, _data_loaded, _current_mes
-    
     if "file" not in request.files:
         return jsonify({"error": "No se envió archivo"}), 400
-    
     f = request.files["file"]
     if not f.filename.lower().endswith(".xlsx"):
         return jsonify({"error": "El archivo debe ser .xlsx"}), 400
-    
     file_path = UPLOAD_DIR / "data.xlsx"
     f.save(str(file_path))
     
+    # Verificar que se cargó correctamente
     try:
-        print(f"📂 Procesando archivo subido: {file_path}")
-        _cached_df = _load_data(file_path)
-        _data_loaded = True
-        _current_mes = get_mes_actual()
-        
-        print(f"✅ Archivo procesado: {len(_cached_df)} filas")
-        
-        return jsonify({
-            "ok": True,
-            "rows": len(_cached_df),
-            "message": f"Archivo cargado con {len(_cached_df)} registros",
-            "mes": _current_mes
-        })
+        df = pd.read_excel(file_path, engine="openpyxl")
+        return jsonify({"ok": True, "rows": len(df), "message": f"Archivo cargado con {len(df)} registros"})
     except Exception as e:
-        print(f"❌ Error al procesar archivo: {e}")
-        import traceback
-        traceback.print_exc()
-        _cached_df = None
-        _data_loaded = False
         return jsonify({"error": str(e)}), 500
 
 @app.route("/api/tasks")
 @login_required
 def api_tasks():
-    global _cached_df, _data_loaded
+    file_path = UPLOAD_DIR / "data.xlsx"
+    if not file_path.exists():
+        return jsonify({"error": "No hay datos cargados", "no_data": True}), 404
     
     try:
-        print("🔍 INICIO api_tasks")
-        print(f"📊 _data_loaded: {_data_loaded}")
-        print(f"📊 _cached_df is None: {_cached_df is None}")
-        
-        if not _data_loaded or _cached_df is None or _cached_df.empty:
-            file_path = UPLOAD_DIR / "data.xlsx"
-            if file_path.exists():
-                try:
-                    print("🔄 Cargando archivo existente...")
-                    _cached_df = _load_data(file_path)
-                    _data_loaded = True
-                    print(f"✅ Datos cargados: {len(_cached_df)} filas")
-                except Exception as e:
-                    print(f"❌ Error cargando archivo: {e}")
-                    return jsonify({"error": f"Error cargando datos: {str(e)}", "no_data": True}), 404
-            else:
-                return jsonify({"error": "No hay datos cargados. Sube un archivo Excel.", "no_data": True}), 404
-        
+        df = pd.read_excel(file_path, engine="openpyxl")
         supervisor_id = session.get('supervisor_id')
-        supervisor_name = SUPERVISORS.get(supervisor_id, "Desconocido")
         
-        start_date = request.args.get("start_date", type=str)
-        end_date = request.args.get("end_date", type=str)
+        # Filtrar por supervisor
+        if 'Supervisor ID' in df.columns:
+            df = df[df['Supervisor ID'] == supervisor_id]
         
-        result = _cached_df[_cached_df["Supervisor ID"] == supervisor_id].copy()
+        if df.empty:
+            return jsonify({"error": "No hay tareas para este supervisor", "no_tasks": True}), 404
         
-        if result.empty:
-            return jsonify({"error": f"No hay tareas asignadas para {supervisor_name}", "no_tasks": True}), 404
+        # Ordenar por fecha
+        if 'Fecha' in df.columns:
+            df = df.sort_values(by="Fecha", ascending=True)
         
-        result = result.sort_values(by="Fecha", ascending=True)
+        # Renombrar columna de imagen
+        if "TaskImageUrl" in df.columns and "Img" not in df.columns:
+            df = df.rename(columns={"TaskImageUrl": "Img"})
         
-        if start_date or end_date:
-            try:
-                result['fecha_dt'] = pd.to_datetime(result['Fecha'], format='%d/%m/%Y', errors='coerce')
-                if start_date:
-                    start_dt = datetime.strptime(start_date, "%d/%m/%Y")
-                    result = result[result['fecha_dt'] >= start_dt]
-                if end_date:
-                    end_dt = datetime.strptime(end_date, "%d/%m/%Y")
-                    result = result[result['fecha_dt'] <= end_dt]
-                result = result.drop(columns=['fecha_dt'])
-            except Exception as e:
-                print(f"⚠️ Error en filtros: {e}")
+        if "Img" not in df.columns:
+            df["Img"] = ""
         
-        if result.empty:
-            return jsonify({"error": "No hay tareas en el rango de fechas", "no_tasks": True}), 404
-        
-        response_rows = []
-        for _, row in result.iterrows():
-            task_id = row["task_id"]
-            
+        response = []
+        for _, row in df.iterrows():
             img_url = clean_text(row.get("Img", ""))
-            if not img_url:
-                img_url = clean_text(row.get("TaskImageUrl", ""))
+            poc_id = clean_text(row.get("POC ID", ""))
             
-            try:
-                status_sheets = get_status_from_sheets(img_url)
-            except Exception as e:
-                print(f"⚠️ Error al leer status desde Sheets: {e}")
-                status_sheets = None
+            # Buscar status en Sheets
+            status_info = get_status_from_sheets(img_url) if img_url else None
             
-            if status_sheets:
-                is_reviewed = True
-                review = {
-                    "status": status_sheets["status"],
-                    "observaciones": status_sheets.get("observaciones", ""),
-                    "fecha_revision": status_sheets.get("fecha_revision", "")
-                }
-            else:
-                is_reviewed = False
-                review = None
-            
-            raw_poc_id = clean_text(row.get("POC ID"))
-            short_poc_id = extract_short_poc_id(raw_poc_id)
-            client_info = get_client_info(raw_poc_id)
-            
-            response_rows.append({
-                "row_id": int(row["row_id"]),
-                "task_id": task_id,
+            response.append({
+                "row_id": int(_),
+                "task_id": f"task_{_}",
                 "fecha": formatear_fecha(row.get("Fecha")),
                 "promotor": clean_text(row.get("Promotor")),
-                "poc_id": short_poc_id,
-                "poc_id_completo": raw_poc_id,
-                "cliente_id": short_poc_id,
-                "razon_social": client_info.get("nombre") if client_info else "SIN DATO",
-                "direccion": client_info.get("direccion") if client_info else "SIN DATO",
+                "poc_id": extract_short_poc_id(poc_id),
+                "poc_id_completo": poc_id,
+                "cliente_id": extract_short_poc_id(poc_id),
+                "razon_social": get_client_info(poc_id).get("nombre") if get_client_info(poc_id) else "SIN DATO",
+                "direccion": get_client_info(poc_id).get("direccion") if get_client_info(poc_id) else "SIN DATO",
                 "detalle_tarea": clean_text(row.get("Detalle Tarea")),
                 "imagen": img_url,
-                "revisado": is_reviewed,
-                "status": review.get("status") if review else None,
-                "observaciones": review.get("observaciones") if review else "",
-                "fecha_revision": review.get("fecha_revision") if review else None
+                "revisado": status_info is not None,
+                "status": status_info.get("status") if status_info else None,
+                "observaciones": status_info.get("observaciones") if status_info else "",
+                "fecha_revision": status_info.get("fecha_revision") if status_info else None
             })
         
-        print(f"✅ Respondiendo con {len(response_rows)} tareas")
-        return jsonify(response_rows)
+        return jsonify(response)
         
     except Exception as e:
-        print(f"❌ Error en api_tasks: {e}")
+        print(f"❌ Error: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({"error": str(e), "no_data": True}), 500
@@ -541,86 +329,78 @@ def api_save_review():
     if status not in ["objeccion", "invalida", "fraude"]:
         return jsonify({"error": "Status inválido"}), 400
     
-    if _cached_df is None or not _data_loaded:
+    file_path = UPLOAD_DIR / "data.xlsx"
+    if not file_path.exists():
         return jsonify({"error": "No hay datos cargados"}), 404
     
-    task_row = _cached_df[_cached_df["task_id"] == task_id]
-    if task_row.empty:
-        return jsonify({"error": "Tarea no encontrada"}), 404
-    
-    row = task_row.iloc[0]
-    supervisor_name = session['supervisor_name']
-    
-    fecha_tarea = formatear_fecha(row.get("Fecha"))
-    img_url = clean_text(row.get("Img", ""))
-    if not img_url:
-        img_url = clean_text(row.get("TaskImageUrl", ""))
-    
-    success = guardar_status_en_sheets(
-        fecha=fecha_tarea,
-        id_imagen=img_url,
-        status=status,
-        supervisor=supervisor_name,
-        observaciones=observaciones
-    )
-    
-    if success:
-        return jsonify({"ok": True, "message": "Revisión guardada correctamente"})
-    else:
-        return jsonify({"error": "Error al guardar la revisión"}), 500
-
-@app.route("/api/supervisors")
-def api_supervisors():
-    items = [{"id": sid, "name": name} for sid, name in SUPERVISORS.items()]
-    return jsonify(items)
-
-# =====================================================
-# ENDPOINTS DE PRUEBA
-# =====================================================
-
-@app.route("/api/test_sheets_status")
-@login_required
-def test_sheets_status():
     try:
-        gc = get_google_sheet_client()
-        if gc is None:
-            return jsonify({"error": "No se pudo conectar a Google Sheets"}), 500
+        df = pd.read_excel(file_path, engine="openpyxl")
+        row_idx = int(task_id.split("_")[1]) if "_" in task_id else 0
+        if row_idx >= len(df):
+            return jsonify({"error": "Tarea no encontrada"}), 404
         
-        sheet = gc.open_by_key(GOOGLE_SHEETS_CONFIG["sheet_id"])
+        row = df.iloc[row_idx]
+        supervisor_name = session['supervisor_name']
+        fecha_tarea = formatear_fecha(row.get("Fecha"))
+        img_url = clean_text(row.get("Img", row.get("TaskImageUrl", "")))
         
-        try:
-            worksheet = sheet.worksheet("Status")
-            records = worksheet.get_all_records()
-            return jsonify({
-                "conexion": "OK",
-                "total_registros": len(records),
-                "primeros_5": records[:5] if records else []
-            })
-        except gspread.WorksheetNotFound:
-            return jsonify({
-                "conexion": "OK",
-                "total_registros": 0,
-                "mensaje": "La hoja 'Status' no existe aún."
-            })
+        success = guardar_status_en_sheets(fecha_tarea, img_url, status, supervisor_name, observaciones)
+        
+        if success:
+            return jsonify({"ok": True, "message": "Revisión guardada correctamente"})
+        else:
+            return jsonify({"error": "Error al guardar en Sheets"}), 500
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-@app.route("/api/diagnostico_columnas")
+@app.route("/api/supervisors")
+def api_supervisors():
+    return jsonify([{"id": sid, "name": name} for sid, name in SUPERVISORS.items()])
+
+@app.route("/api/stats")
 @login_required
-def diagnostico_columnas():
-    """Ver las columnas del Excel cargado"""
+def api_stats():
     try:
-        file_path = UPLOAD_DIR / "data.xlsx"
-        if not file_path.exists():
-            return jsonify({"error": "No hay archivo cargado"})
+        supervisor_name = session.get('supervisor_name')
+        gc = get_google_sheet_client()
+        if gc is None:
+            return jsonify({"total_revisados": 0, "total_pendientes": 0, "by_status": {"objeccion": 0, "invalida": 0, "fraude": 0}, "porcentaje": 0})
         
-        df = pd.read_excel(file_path, engine="openpyxl")
+        sheet = gc.open_by_key(GOOGLE_SHEETS_CONFIG["sheet_id"])
+        try:
+            worksheet = sheet.worksheet("Status")
+            records = worksheet.get_all_records()
+        except:
+            return jsonify({"total_revisados": 0, "total_pendientes": 0, "by_status": {"objeccion": 0, "invalida": 0, "fraude": 0}, "porcentaje": 0})
+        
+        stats = {"total": 0, "by_status": {"objeccion": 0, "invalida": 0, "fraude": 0}}
+        for row in records:
+            if row.get("Supervisor") == supervisor_name:
+                status = row.get("Status", "")
+                stats["total"] += 1
+                if status in stats["by_status"]:
+                    stats["by_status"][status] += 1
+        
+        file_path = UPLOAD_DIR / "data.xlsx"
+        if file_path.exists():
+            df = pd.read_excel(file_path, engine="openpyxl")
+            supervisor_id = session.get('supervisor_id')
+            if 'Supervisor ID' in df.columns:
+                total_disponibles = len(df[df['Supervisor ID'] == supervisor_id])
+            else:
+                total_disponibles = len(df)
+            pendientes = max(0, total_disponibles - stats["total"])
+            porcentaje = round((stats["total"] / total_disponibles * 100) if total_disponibles > 0 else 0, 1)
+        else:
+            pendientes = 0
+            porcentaje = 0
         
         return jsonify({
-            "columnas": df.columns.tolist(),
-            "total_filas": len(df),
-            "primeras_filas": df.head(2).to_dict('records') if len(df) > 0 else [],
-            "tipos_de_datos": {col: str(df[col].dtype) for col in df.columns}
+            "total_revisados": stats["total"],
+            "total_pendientes": pendientes,
+            "by_status": stats["by_status"],
+            "porcentaje": porcentaje,
+            "has_data": True
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
