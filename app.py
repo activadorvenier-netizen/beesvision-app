@@ -281,66 +281,81 @@ def api_upload():
 @login_required
 def api_tasks():
     global _cached_df, _data_loaded
-    if not _data_loaded or _cached_df is None or _cached_df.empty:
-        return jsonify({"error": "No hay datos cargados. Sube un archivo Excel.", "no_data": True}), 404
-    
-    supervisor_id = session['supervisor_id']
-    start_date = request.args.get("start_date", type=str)
-    end_date = request.args.get("end_date", type=str)
-    
-    # Filtrar por supervisor
-    if "Supervisor ID" in _cached_df.columns:
+    try:
+        if not _data_loaded or _cached_df is None or _cached_df.empty:
+            return jsonify({"error": "No hay datos cargados. Sube un archivo Excel.", "no_data": True}), 404
+        
+        supervisor_id = session['supervisor_id']
+        start_date = request.args.get("start_date", type=str)
+        end_date = request.args.get("end_date", type=str)
+        
+        # Verificar si existe la columna Supervisor ID
+        if "Supervisor ID" not in _cached_df.columns:
+            return jsonify({"error": f"No existe columna 'Supervisor ID'. Columnas: {_cached_df.columns.tolist()}"}), 404
+        
+        # Filtrar por supervisor
         result = _cached_df[_cached_df["Supervisor ID"] == supervisor_id].copy()
+        
         if result.empty:
-            return jsonify({"error": "No hay tareas para este supervisor", "no_tasks": True}), 404
-    else:
-        result = _cached_df.copy()
-    
-    result = result.sort_values(by="Fecha", ascending=True)
-    
-    if start_date and start_date.strip():
-        try:
-            result = result[result["Fecha"].astype(str) >= start_date]
-        except:
-            pass
-    if end_date and end_date.strip():
-        try:
-            result = result[result["Fecha"].astype(str) <= end_date]
-        except:
-            pass
-    
-    if result.empty:
-        return jsonify({"error": "No hay tareas en el rango de fechas", "no_tasks": True}), 404
-    
-    response = []
-    for idx, row in result.iterrows():
-        id_tarea = clean_text(row.get("ID Tarea", ""))
-        status_info = get_status_from_sheets(id_tarea) if id_tarea else None
+            # Mostrar qué supervisores existen en el archivo
+            supervisores = _cached_df["Supervisor ID"].unique().tolist()
+            return jsonify({
+                "error": f"No hay tareas para el supervisor {supervisor_id}",
+                "supervisores_disponibles": supervisores,
+                "total_registros": len(_cached_df)
+            }), 404
         
-        poc_id = clean_text(row.get("POC ID", ""))
-        img_url = clean_text(row.get("Img", ""))
-        if not img_url:
-            img_url = clean_text(row.get("TaskImageUrl", ""))
+        result = result.sort_values(by="Fecha", ascending=True)
         
-        response.append({
-            "row_id": idx,
-            "task_id": f"task_{idx}",
-            "fecha": formatear_fecha(row.get("Fecha")),
-            "promotor": clean_text(row.get("Promotor")),
-            "poc_id": extract_short_poc_id(poc_id),
-            "poc_id_completo": poc_id,
-            "cliente_id": extract_short_poc_id(poc_id),
-            "razon_social": get_client_info(poc_id).get("nombre") if get_client_info(poc_id) else "SIN DATO",
-            "direccion": get_client_info(poc_id).get("direccion") if get_client_info(poc_id) else "SIN DATO",
-            "detalle_tarea": clean_text(row.get("Detalle Tarea")),
-            "imagen": img_url,
-            "revisado": status_info is not None,
-            "status": status_info.get("status") if status_info else None,
-            "observaciones": status_info.get("observaciones") if status_info else "",
-            "fecha_revision": status_info.get("fecha_revision") if status_info else None
-        })
-    
-    return jsonify(response)
+        if start_date and start_date.strip():
+            try:
+                result = result[result["Fecha"].astype(str) >= start_date]
+            except:
+                pass
+        if end_date and end_date.strip():
+            try:
+                result = result[result["Fecha"].astype(str) <= end_date]
+            except:
+                pass
+        
+        if result.empty:
+            return jsonify({"error": "No hay tareas en el rango de fechas", "no_tasks": True}), 404
+        
+        response = []
+        for idx, row in result.iterrows():
+            id_tarea = clean_text(row.get("ID Tarea", ""))
+            status_info = get_status_from_sheets(id_tarea) if id_tarea else None
+            
+            poc_id = clean_text(row.get("POC ID", ""))
+            img_url = clean_text(row.get("Img", ""))
+            if not img_url:
+                img_url = clean_text(row.get("TaskImageUrl", ""))
+            
+            response.append({
+                "row_id": idx,
+                "task_id": f"task_{idx}",
+                "fecha": formatear_fecha(row.get("Fecha")),
+                "promotor": clean_text(row.get("Promotor")),
+                "poc_id": extract_short_poc_id(poc_id),
+                "poc_id_completo": poc_id,
+                "cliente_id": extract_short_poc_id(poc_id),
+                "razon_social": get_client_info(poc_id).get("nombre") if get_client_info(poc_id) else "SIN DATO",
+                "direccion": get_client_info(poc_id).get("direccion") if get_client_info(poc_id) else "SIN DATO",
+                "detalle_tarea": clean_text(row.get("Detalle Tarea")),
+                "imagen": img_url,
+                "revisado": status_info is not None,
+                "status": status_info.get("status") if status_info else None,
+                "observaciones": status_info.get("observaciones") if status_info else "",
+                "fecha_revision": status_info.get("fecha_revision") if status_info else None
+            })
+        
+        return jsonify(response)
+    except Exception as e:
+        import traceback
+        return jsonify({
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }), 500
 
 @app.route("/api/save_review", methods=["POST"])
 @login_required
