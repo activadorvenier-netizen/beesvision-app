@@ -257,16 +257,49 @@ def api_tasks():
     result = _cached_df[_cached_df["Supervisor ID"] == supervisor_id].copy()
     if result.empty:
         return jsonify({"error": f"No hay tareas asignadas para {SUPERVISORS[supervisor_id]}", "no_tasks": True}), 404
-    if start_date:
+    
+    # =========================================
+    # FILTRO DE FECHAS CORREGIDO
+    # =========================================
+    if start_date and end_date:
         try:
+            # Convertir fechas del Excel a datetime
+            result['Fecha_dt'] = pd.to_datetime(result['Fecha'], format='%d/%m/%Y', errors='coerce')
+            
+            # Convertir fechas del filtro a datetime
+            start_dt = datetime.strptime(start_date, "%d/%m/%Y")
+            end_dt = datetime.strptime(end_date, "%d/%m/%Y")
+            
+            # Filtrar
+            result = result[(result['Fecha_dt'] >= start_dt) & (result['Fecha_dt'] <= end_dt)]
+            
+            # Eliminar columna temporal
+            result = result.drop(columns=['Fecha_dt'])
+        except Exception as e:
+            print(f"Error en filtro de fechas: {e}")
+            # Si falla, intentar comparar como string
+            if start_date:
+                result = result[result["Fecha"].astype(str) >= start_date]
+            if end_date:
+                result = result[result["Fecha"].astype(str) <= end_date]
+    elif start_date:
+        try:
+            result['Fecha_dt'] = pd.to_datetime(result['Fecha'], format='%d/%m/%Y', errors='coerce')
+            start_dt = datetime.strptime(start_date, "%d/%m/%Y")
+            result = result[result['Fecha_dt'] >= start_dt]
+            result = result.drop(columns=['Fecha_dt'])
+        except:
             result = result[result["Fecha"].astype(str) >= start_date]
-        except:
-            pass
-    if end_date:
+    elif end_date:
         try:
-            result = result[result["Fecha"].astype(str) <= end_date]
+            result['Fecha_dt'] = pd.to_datetime(result['Fecha'], format='%d/%m/%Y', errors='coerce')
+            end_dt = datetime.strptime(end_date, "%d/%m/%Y")
+            result = result[result['Fecha_dt'] <= end_dt]
+            result = result.drop(columns=['Fecha_dt'])
         except:
-            pass
+            result = result[result["Fecha"].astype(str) <= end_date]
+    # =========================================
+    
     if result.empty:
         return jsonify({"error": "No hay tareas en el rango de fechas", "no_tasks": True}), 404
     task_ids = result["task_id"].tolist()
