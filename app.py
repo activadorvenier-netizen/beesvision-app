@@ -283,10 +283,17 @@ def formatear_fecha(fecha_valor):
 def _load_data(path: Path) -> pd.DataFrame:
     df = pd.read_excel(path, engine="openpyxl")
     
+    # Mapeo flexible de columnas
     if "TaskImageUrl" in df.columns and "Img" not in df.columns:
         df = df.rename(columns={"TaskImageUrl": "Img"})
     
-    required = ["Fecha", "Promotor", "POC ID", "Detalle Tarea", "Img", "Completada", "Validada", "Visita Valida", "Supervisor ID"]
+    # Verificar columnas requeridas
+    required = ["Fecha", "Promotor", "POC ID", "Detalle Tarea", "Completada", "Validada", "Visita Valida", "Supervisor ID"]
+    
+    # Si no existe 'Img', crearla vacía
+    if "Img" not in df.columns:
+        df["Img"] = ""
+        print("⚠️ Columna 'Img' no encontrada, creada vacía")
     
     missing = [c for c in required if c not in df.columns]
     if missing:
@@ -294,11 +301,26 @@ def _load_data(path: Path) -> pd.DataFrame:
     
     df = df.copy()
     
+    # Convertir columnas a numérico
     df["Completada"] = pd.to_numeric(df["Completada"], errors="coerce")
     df["Validada"] = pd.to_numeric(df["Validada"], errors="coerce")
     df["Supervisor ID"] = pd.to_numeric(df["Supervisor ID"], errors="coerce").astype("Int64")
-    df["VisitaValidaBool"] = df["Visita Valida"].apply(_is_visita_valida)
     
+    # Convertir Visita Valida (manejar diferentes formatos)
+    def convertir_visita_valida(valor):
+        if pd.isna(valor):
+            return False
+        if isinstance(valor, (int, float)):
+            return float(valor) == 1.0
+        if isinstance(valor, bool):
+            return valor
+        if isinstance(valor, str):
+            return valor.strip().upper() in {"VERDADERO", "TRUE", "1", "SI", "YES"}
+        return False
+    
+    df["VisitaValidaBool"] = df["Visita Valida"].apply(convertir_visita_valida)
+    
+    # Aplicar filtros
     filtered = df[
         (df["Completada"] == 1.0) &
         (df["Validada"] == 0.0) &
@@ -580,6 +602,26 @@ def test_sheets_status():
                 "total_registros": 0,
                 "mensaje": "La hoja 'Status' no existe aún."
             })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/diagnostico_columnas")
+@login_required
+def diagnostico_columnas():
+    """Ver las columnas del Excel cargado"""
+    try:
+        file_path = UPLOAD_DIR / "data.xlsx"
+        if not file_path.exists():
+            return jsonify({"error": "No hay archivo cargado"})
+        
+        df = pd.read_excel(file_path, engine="openpyxl")
+        
+        return jsonify({
+            "columnas": df.columns.tolist(),
+            "total_filas": len(df),
+            "primeras_filas": df.head(2).to_dict('records') if len(df) > 0 else [],
+            "tipos_de_datos": {col: str(df[col].dtype) for col in df.columns}
+        })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
