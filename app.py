@@ -267,6 +267,29 @@ def api_tasks():
         if 'Supervisor ID' in df.columns:
             df = df[df['Supervisor ID'] == supervisor_id]
         
+        # Aplicar filtros de fecha
+        start_date = request.args.get("start_date", type=str)
+        end_date = request.args.get("end_date", type=str)
+        
+        if 'Fecha' in df.columns:
+            if start_date:
+                try:
+                    start_dt = datetime.strptime(start_date, "%d/%m/%Y")
+                    df['Fecha_dt'] = pd.to_datetime(df['Fecha'], format='%d/%m/%Y', errors='coerce')
+                    df = df[df['Fecha_dt'] >= start_dt]
+                except:
+                    pass
+            if end_date:
+                try:
+                    end_dt = datetime.strptime(end_date, "%d/%m/%Y")
+                    if 'Fecha_dt' not in df.columns:
+                        df['Fecha_dt'] = pd.to_datetime(df['Fecha'], format='%d/%m/%Y', errors='coerce')
+                    df = df[df['Fecha_dt'] <= end_dt]
+                except:
+                    pass
+            if 'Fecha_dt' in df.columns:
+                df = df.drop(columns=['Fecha_dt'])
+        
         if df.empty:
             return jsonify({"error": "No hay tareas para este supervisor", "no_tasks": True}), 404
         
@@ -281,8 +304,11 @@ def api_tasks():
         if "Img" not in df.columns:
             df["Img"] = ""
         
+        # Resetear índice para tener row_id correcto
+        df = df.reset_index(drop=True)
+        
         response = []
-        for _, row in df.iterrows():
+        for idx, row in df.iterrows():
             img_url = clean_text(row.get("Img", ""))
             poc_id = clean_text(row.get("POC ID", ""))
             
@@ -290,8 +316,8 @@ def api_tasks():
             status_info = get_status_from_sheets(img_url) if img_url else None
             
             response.append({
-                "row_id": int(_),
-                "task_id": f"task_{_}",
+                "row_id": idx,  # Usar el índice del DataFrame
+                "task_id": f"task_{idx}",
                 "fecha": formatear_fecha(row.get("Fecha")),
                 "promotor": clean_text(row.get("Promotor")),
                 "poc_id": extract_short_poc_id(poc_id),
@@ -310,10 +336,55 @@ def api_tasks():
         return jsonify(response)
         
     except Exception as e:
-        print(f"❌ Error: {e}")
+        print(f"❌ Error en api_tasks: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({"error": str(e), "no_data": True}), 500
+
+@app.route("/api/save_review", methods=["POST"])
+@login_required
+def api_save_review():
+    data = request.json
+    task_id = data.get("task_id")
+    status = data.get("status")
+    observaciones = data.get("observaciones", "")
+    
+    if not task_id or not status:
+        return jsonify({"error": "Faltan datos"}), 400
+    
+    if status not in ["objeccion", "invalida", "fraude"]:
+        return jsonify({"error": "Status inválido"}), 400
+    
+    file_path = UPLOAD_DIR / "data.xlsx"
+    if not file_path.exists():
+        return jsonify({"error": "No hay datos cargados"}), 404
+    
+    try:
+        df = pd.read_excel(file_path, engine="openpyxl")
+        
+        # Obtener el índice de la tarea
+        try:
+            row_idx = int(task_id.split("_")[1])
+        except:
+            return jsonify({"error": "ID de tarea inválido"}), 404
+        
+        if row_idx >= len(df):
+            return jsonify({"error": "Tarea no encontrada"}), 404
+        
+        row = df.iloc[row_idx]
+        supervisor_name = session['supervisor_name']
+        fecha_tarea = formatear_fecha(row.get("Fecha"))
+        img_url = clean_text(row.get("Img", row.get("TaskImageUrl", "")))
+        
+        success = guardar_status_en_sheets(fecha_tarea, img_url, status, supervisor_name, observaciones)
+        
+        if success:
+            return jsonify({"ok": True, "message": "Revisión guardada correctamente"})
+        else:
+            return jsonify({"error": "Error al guardar en Sheets"}), 500
+    except Exception as e:
+        print(f"❌ Error en save_review: {e}")
+        return jsonify({"error": str(e)}), 500
 
 @app.route("/api/save_review", methods=["POST"])
 @login_required
@@ -362,48 +433,58 @@ def api_supervisors():
 def api_stats():
     try:
         supervisor_name = session.get('supervisor_name')
-        gc = get_google_sheet_client()
-        if gc is None:
-            return jsonify({"total_revisados": 0, "total_pendientes": 0, "by_status": {"objeccion": 0, "invalida": 0, "fraude": 0}, "porcentaje": 0})
+        supervisor_id = session.get('supervisor_id')
         
-        sheet = gc.open_by_key(GOOGLE_SHEETS_CONFIG["sheet_id"])
-        try:
-            worksheet = sheet.worksheet("Status")
-            records = worksheet.get_all_records()
-        except:
-            return jsonify({"total_revisados": 0, "total_pendientes": 0, "by_status": {"objeccion": 0, "invalida": 0, "fraude": 0}, "porcentaje": 0})
-        
+        # 1. Obtener estadísticas desde Sheets
         stats = {"total": 0, "by_status": {"objeccion": 0, "invalida": 0, "fraude": 0}}
-        for row in records:
-            if row.get("Supervisor") == supervisor_name:
-                status = row.get("Status", "")
-                stats["total"] += 1
-                if status in stats["by_status"]:
-                    stats["by_status"][status] += 1
         
+        gc = get_google_sheet_client()
+        if gc:
+            try:
+                sheet = gc.open_by_key(GOOGLE_SHEETS_CONFIG["sheet_id"])
+                worksheet = sheet.worksheet("Status")
+                records = worksheet.get_all_records()
+                
+                for row in records:
+                    if row.get("Supervisor") == supervisor_name:
+                        status = row.get("Status", "")
+                        stats["total"] += 1
+                        if status in stats["by_status"]:
+                            stats["by_status"][status] += 1
+            except:
+                pass
+        
+        # 2. Obtener total de tareas del archivo
         file_path = UPLOAD_DIR / "data.xlsx"
         if file_path.exists():
             df = pd.read_excel(file_path, engine="openpyxl")
-            supervisor_id = session.get('supervisor_id')
             if 'Supervisor ID' in df.columns:
                 total_disponibles = len(df[df['Supervisor ID'] == supervisor_id])
             else:
                 total_disponibles = len(df)
-            pendientes = max(0, total_disponibles - stats["total"])
-            porcentaje = round((stats["total"] / total_disponibles * 100) if total_disponibles > 0 else 0, 1)
         else:
-            pendientes = 0
-            porcentaje = 0
+            total_disponibles = 0
+        
+        pendientes = max(0, total_disponibles - stats["total"])
+        porcentaje = round((stats["total"] / total_disponibles * 100) if total_disponibles > 0 else 0, 1)
         
         return jsonify({
             "total_revisados": stats["total"],
             "total_pendientes": pendientes,
             "by_status": stats["by_status"],
             "porcentaje": porcentaje,
+            "total_disponibles": total_disponibles,
             "has_data": True
         })
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        print(f"❌ Error en stats: {e}")
+        return jsonify({
+            "total_revisados": 0,
+            "total_pendientes": 0,
+            "by_status": {"objeccion": 0, "invalida": 0, "fraude": 0},
+            "porcentaje": 0,
+            "has_data": True
+        })
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
