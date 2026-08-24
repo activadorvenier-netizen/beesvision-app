@@ -193,10 +193,17 @@ def login_required(f):
 
 def _load_data(path: Path) -> pd.DataFrame:
     df = pd.read_excel(path, engine="openpyxl")
+    
+    # Asegurar columna Img
     if "TaskImageUrl" in df.columns and "Img" not in df.columns:
         df = df.rename(columns={"TaskImageUrl": "Img"})
     if "Img" not in df.columns:
         df["Img"] = ""
+    
+    # Asegurar columna ID Tarea
+    if "ID Tarea" not in df.columns:
+        df["ID Tarea"] = ""
+    
     return df
 
 # =====================================================
@@ -238,13 +245,17 @@ def api_upload():
         return jsonify({"error": "El archivo debe ser .xlsx"}), 400
     file_path = UPLOAD_DIR / "data.xlsx"
     f.save(str(file_path))
+    
     try:
         _cached_df = _load_data(file_path)
         _data_loaded = True
+        print(f"✅ Archivo cargado: {len(_cached_df)} filas")
+        print(f"📊 Columnas: {_cached_df.columns.tolist()}")
         return jsonify({"ok": True, "rows": len(_cached_df), "message": f"Archivo cargado con {len(_cached_df)} registros"})
     except Exception as e:
         _cached_df = None
         _data_loaded = False
+        print(f"❌ Error: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route("/api/tasks")
