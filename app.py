@@ -437,7 +437,7 @@ def api_save_review():
     observaciones = data.get("observaciones", "")
     if not task_id or not status:
         return jsonify({"error": "Faltan datos"}), 400
-    if status not in ["objeccion", "invalida", "fraude"]:
+    if status not in ["objecion", "invalida", "fraude"]:
         return jsonify({"error": "Status inválido"}), 400
     if _cached_df is None or not _data_loaded:
         return jsonify({"error": "No hay datos cargados"}), 404
