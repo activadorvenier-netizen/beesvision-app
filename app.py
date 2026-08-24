@@ -8,7 +8,6 @@ from functools import wraps
 import hashlib
 from datetime import datetime
 import io
-from models import ReviewDatabase
 import json
 import re
 import os
@@ -29,8 +28,6 @@ except ImportError as e:
 BASE_DIR = Path(__file__).resolve().parent
 UPLOAD_DIR = BASE_DIR / "uploads"
 UPLOAD_DIR.mkdir(exist_ok=True)
-
-db = ReviewDatabase()
 
 SUPERVISORS = {
     14: "Bruno Del Popolo",
@@ -209,6 +206,47 @@ def get_status_from_sheets(id_imagen):
         print(f"❌ Error al leer status desde Sheets: {e}")
         return None
 
+def get_stats_from_sheets(supervisor_name):
+    """
+    Obtener estadísticas de la hoja 'Status' para un supervisor específico
+    """
+    try:
+        gc = get_google_sheet_client()
+        if gc is None:
+            return None
+        
+        sheet = gc.open_by_key(GOOGLE_SHEETS_CONFIG["sheet_id"])
+        
+        try:
+            worksheet = sheet.worksheet("Status")
+        except gspread.WorksheetNotFound:
+            return None
+        
+        records = worksheet.get_all_records()
+        
+        # Filtrar por supervisor
+        stats = {
+            "total": 0,
+            "by_status": {
+                "objeccion": 0,
+                "invalida": 0,
+                "fraude": 0
+            }
+        }
+        
+        for row in records:
+            supervisor = row.get("Supervisor", "")
+            if supervisor == supervisor_name:
+                status = row.get("Status", "")
+                stats["total"] += 1
+                if status in stats["by_status"]:
+                    stats["by_status"][status] += 1
+        
+        return stats
+    except Exception as e:
+        print(f"❌ Error al leer stats desde Sheets: {e}")
+        return None
+
 # =====================================================
 # FUNCIONES
 # =====================================================
@@ -307,14 +345,6 @@ def formatear_fecha(fecha_valor):
         return f"{dia}/{mes}/{año}"
     
     return fecha_str
-
-def formatear_fecha_revision(fecha_revision):
-    """Formatear fecha de revisión a DD/MM/YYYY"""
-    if not fecha_revision:
-        return ""
-    if ' ' in fecha_revision:
-        return fecha_revision.split(' ')[0]
-    return fecha_revision
 
 def _load_data(path: Path) -> pd.DataFrame:
     global _current_excel, _data_loaded, _current_mes
@@ -478,7 +508,6 @@ def api_tasks():
         
         result = result.sort_values(by="Fecha", ascending=True)
         
-        # Filtros de fecha
         if start_date or end_date:
             try:
                 result['fecha_dt'] = pd.to_datetime(result['Fecha'], format='%d/%m/%Y', errors='coerce')
@@ -500,7 +529,6 @@ def api_tasks():
         if result.empty:
             return jsonify({"error": "No hay tareas en el rango de fechas", "no_tasks": True}), 404
         
-        # Construir respuesta
         response_rows = []
         for _, row in result.iterrows():
             task_id = row["task_id"]
@@ -509,7 +537,6 @@ def api_tasks():
             if not img_url:
                 img_url = clean_text(row.get("TaskImageUrl", ""))
             
-            # Leer status desde Sheets
             try:
                 status_sheets = get_status_from_sheets(img_url)
             except Exception as e:
@@ -587,7 +614,6 @@ def api_save_review():
     if not img_url:
         img_url = clean_text(row.get("TaskImageUrl", ""))
     
-    # GUARDAR SOLO EN GOOGLE SHEETS (hoja Status)
     success = guardar_status_en_sheets(
         fecha=fecha_tarea,
         id_imagen=img_url,
@@ -614,7 +640,6 @@ def api_delete_review(task_id):
         if task_row.empty:
             return jsonify({"error": "Tarea no encontrada"}), 404
         
-        # Eliminar de Sheets
         try:
             img_url = clean_text(task_row.iloc[0].get("Img", ""))
             if not img_url:
@@ -646,33 +671,64 @@ def api_delete_review(task_id):
 def api_stats():
     global _data_loaded
     
-    supervisor_id = session['supervisor_id']
-    mes = _current_mes or get_mes_actual()
-    stats = db.get_supervisor_stats(supervisor_id, mes)
-    
-    if not _data_loaded or _cached_df is None:
+    try:
+        supervisor_name = session.get('supervisor_name')
+        
+        # Si no hay datos cargados
+        if not _data_loaded or _cached_df is None:
+            return jsonify({
+                "total_revisados": 0,
+                "total_pendientes": 0,
+                "by_status": {"objeccion": 0, "invalida": 0, "fraude": 0},
+                "porcentaje": 0,
+                "no_data": True
+            })
+        
+        # Total de tareas disponibles para el supervisor
+        supervisor_id = session.get('supervisor_id')
+        total_disponibles = len(_cached_df[_cached_df["Supervisor ID"] == supervisor_id])
+        
+        # Obtener estadísticas desde Google Sheets
+        stats = get_stats_from_sheets(supervisor_name)
+        
+        if stats:
+            total_revisados = stats["total"]
+            total_pendientes = total_disponibles - total_revisados
+            porcentaje = round((total_revisados / total_disponibles * 100) if total_disponibles > 0 else 0, 1)
+            
+            return jsonify({
+                "total_revisados": total_revisados,
+                "total_pendientes": total_pendientes,
+                "by_status": stats["by_status"],
+                "porcentaje": porcentaje,
+                "total_disponibles": total_disponibles,
+                "has_data": True,
+                "mes": _current_mes
+            })
+        else:
+            # Si no se pudo obtener de Sheets
+            return jsonify({
+                "total_revisados": 0,
+                "total_pendientes": total_disponibles,
+                "by_status": {"objeccion": 0, "invalida": 0, "fraude": 0},
+                "porcentaje": 0,
+                "has_data": True,
+                "mes": _current_mes,
+                "mensaje": "No se pudieron obtener estadísticas de Sheets"
+            })
+            
+    except Exception as e:
+        print(f"❌ Error en api_stats: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({
-            "total_revisados": stats["total"],
+            "total_revisados": 0,
             "total_pendientes": 0,
-            "by_status": stats["by_status"],
+            "by_status": {"objeccion": 0, "invalida": 0, "fraude": 0},
             "porcentaje": 0,
-            "no_data": True
+            "no_data": True,
+            "error": str(e)
         })
-    
-    total_disponibles = len(_cached_df[_cached_df["Supervisor ID"] == supervisor_id])
-    task_ids = _cached_df[_cached_df["Supervisor ID"] == supervisor_id]["task_id"].tolist()
-    pending_tasks = db.get_pending_tasks(supervisor_id, task_ids)
-    total_pendientes = len(pending_tasks)
-    
-    return jsonify({
-        "total_revisados": stats["total"],
-        "total_pendientes": total_pendientes,
-        "by_status": stats["by_status"],
-        "porcentaje": round((stats["total"] / total_disponibles * 100) if total_disponibles > 0 else 0, 1),
-        "total_disponibles": total_disponibles,
-        "has_data": True,
-        "mes": mes
-    })
 
 @app.route("/api/supervisors")
 def api_supervisors():
@@ -781,19 +837,15 @@ def tasks_simple():
     try:
         global _cached_df, _data_loaded
         
-        # Verificar datos cargados
         if not _data_loaded or _cached_df is None or _cached_df.empty:
             return jsonify({"error": "No hay datos cargados", "status": "no_data"})
         
         supervisor_id = session.get('supervisor_id')
-        
-        # Filtrar por supervisor
         result = _cached_df[_cached_df["Supervisor ID"] == supervisor_id].copy()
         
         if result.empty:
             return jsonify({"error": "No hay tareas", "status": "empty"})
         
-        # Devolver solo datos básicos (sin Sheets)
         tareas = []
         for _, row in result.iterrows():
             tareas.append({
