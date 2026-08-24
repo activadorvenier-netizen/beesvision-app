@@ -434,5 +434,25 @@ def api_export_reviews():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@app.route("/api/diagnostico")
+@login_required
+def diagnostico():
+    global _cached_df, _data_loaded
+    try:
+        return jsonify({
+            "data_loaded": _data_loaded,
+            "cached_df_is_none": _cached_df is None,
+            "cached_df_rows": len(_cached_df) if _cached_df is not None else 0,
+            "cached_df_columns": _cached_df.columns.tolist() if _cached_df is not None else [],
+            "cached_df_head": _cached_df.head(2).to_dict('records') if _cached_df is not None and not _cached_df.empty else [],
+            "supervisor_id": session.get('supervisor_id'),
+            "supervisor_name": session.get('supervisor_name'),
+            "tareas_supervisor": len(_cached_df[_cached_df["Supervisor ID"] == session.get('supervisor_id')]) if _cached_df is not None and not _cached_df.empty else 0,
+            "filter_start": request.args.get("start_date"),
+            "filter_end": request.args.get("end_date")
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
