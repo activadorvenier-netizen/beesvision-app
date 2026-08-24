@@ -395,7 +395,7 @@
         
         .stat-item .value.pending { color: #f57f17; }
         .stat-item .value.reviewed { color: #2e7d32; }
-        .stat-item .value.objeccion { color: #1565c0; }
+        .stat-item .value.objecion { color: #1565c0; }
         .stat-item .value.invalida { color: #c62828; }
         .stat-item .value.fraude { color: #6d1b1b; }
         .stat-item .value.no-data { color: #999; font-size: 20px; }
@@ -492,7 +492,7 @@
         }
         
         .status-badge.pending { background: #fff3e0; color: #e65100; }
-        .status-badge.objeccion { background: #e3f2fd; color: #0d47a1; }
+        .status-badge.objecion { background: #e3f2fd; color: #0d47a1; }
         .status-badge.invalida { background: #ffebee; color: #b71c1c; }
         .status-badge.fraude { background: #fce4ec; color: #880e4f; }
         
@@ -525,11 +525,11 @@
             transform: none !important;
         }
         
-        .btn-objeccion { background: #e3f2fd; color: #0d47a1; }
+        .btn-objecion { background: #e3f2fd; color: #0d47a1; }
         .btn-invalida { background: #ffebee; color: #b71c1c; }
         .btn-fraude { background: #fce4ec; color: #880e4f; }
         
-        .btn-objeccion.active { background: #0d47a1; color: var(--blanco); border-color: #0d47a1; }
+        .btn-objecion.active { background: #0d47a1; color: var(--blanco); border-color: #0d47a1; }
         .btn-invalida.active { background: #b71c1c; color: var(--blanco); border-color: #b71c1c; }
         .btn-fraude.active { background: #880e4f; color: var(--blanco); border-color: #880e4f; }
         
@@ -829,7 +829,7 @@
                     <span class="label">Pendientes</span>
                 </div>
                 <div class="stat-item">
-                    <span class="value objeccion" id="statObjeccion">0</span>
+                    <span class="value objecion" id="statobjecion">0</span>
                     <span class="label">Objeciones</span>
                 </div>
                 <div class="stat-item">
@@ -860,7 +860,7 @@
                     <select id="filterStatus">
                         <option value="all">Todos</option>
                         <option value="pending">Pendientes</option>
-                        <option value="objeccion">Objeción</option>
+                        <option value="objecion">Objeción</option>
                         <option value="invalida">Inválida</option>
                         <option value="fraude">Fraude</option>
                     </select>
@@ -1160,8 +1160,8 @@
                             ${task.observaciones ? `<div style="font-size: 13px; color: #555; margin: 5px 0;">💬 ${task.observaciones}</div>` : ''}
                             
                             <div class="review-actions">
-                                <button class="btn-objeccion ${task.status === 'objeccion' ? 'active' : ''}" 
-                                        onclick="event.stopPropagation(); selectStatus('${task.task_id}', 'objeccion')"
+                                <button class="btn-objecion ${task.status === 'objecion' ? 'active' : ''}" 
+                                        onclick="event.stopPropagation(); selectStatus('${task.task_id}', 'objecion')"
                                         ${isSaved ? 'disabled' : ''}>✅ Objeción</button>
                                 <button class="btn-invalida ${task.status === 'invalida' ? 'active' : ''}" 
                                         onclick="event.stopPropagation(); selectStatus('${task.task_id}', 'invalida')"
@@ -1204,7 +1204,7 @@
             const buttons = card.querySelectorAll('.review-actions button');
             buttons.forEach(btn => btn.classList.remove('active'));
             const buttonMap = {
-                'objeccion': '.btn-objeccion',
+                'objecion': '.btn-objecion',
                 'invalida': '.btn-invalida',
                 'fraude': '.btn-fraude'
             };
@@ -1329,7 +1329,7 @@
                 const stats = await response.json();
                 document.getElementById('statTotal').textContent = stats.total_revisados || 0;
                 document.getElementById('statPending').textContent = stats.total_pendientes || 0;
-                document.getElementById('statObjeccion').textContent = stats.by_status?.objeccion || 0;
+                document.getElementById('statobjecion').textContent = stats.by_status?.objecion || 0;
                 document.getElementById('statInvalida').textContent = stats.by_status?.invalida || 0;
                 document.getElementById('statFraude').textContent = stats.by_status?.fraude || 0;
                 if (stats.no_data) {
