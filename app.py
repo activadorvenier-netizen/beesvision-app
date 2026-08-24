@@ -180,14 +180,18 @@ def api_login():
         return jsonify({"error": "Supervisor no encontrado"}), 404
     session['supervisor_id'] = supervisor_id
     session['supervisor_name'] = SUPERVISORS[supervisor_id]
-    global _cached_df, _data_loaded
-    file_path = UPLOAD_DIR / "data.xlsx"
-    if file_path.exists():
-        try:
-            _cached_df = _load_data(file_path)
-            _data_loaded = True
-        except Exception as e:
-            print(f"Error recargando datos: {e}")
+    # =========================================
+    # ELIMINADO: No buscar archivos al iniciar sesión
+    # =========================================
+    # global _cached_df, _data_loaded
+    # file_path = UPLOAD_DIR / "data.xlsx"
+    # if file_path.exists():
+    #     try:
+    #         _cached_df = _load_data(file_path)
+    #         _data_loaded = True
+    #     except Exception as e:
+    #         print(f"Error recargando datos: {e}")
+    # =========================================
     return jsonify({
         "ok": True,
         "supervisor_id": supervisor_id,
@@ -202,13 +206,11 @@ def api_logout():
 @app.route("/api/has_file")
 @login_required
 def api_has_file():
-    global _data_loaded
-    file_exists = (UPLOAD_DIR / "data.xlsx").exists()
     return jsonify({
-        "has_file": file_exists and _data_loaded,
-        "file_exists": file_exists,
-        "data_loaded": _data_loaded,
-        "mes_actual": _current_mes
+        "has_file": False,
+        "file_exists": False,
+        "data_loaded": False,
+        "mes_actual": None
     })
 
 @app.route("/api/upload", methods=["POST"])
