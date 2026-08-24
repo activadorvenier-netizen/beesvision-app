@@ -10,6 +10,18 @@ import io
 from models import ReviewDatabase
 import json
 import re
+import os
+from tempfile import NamedTemporaryFile
+
+# =====================================================
+# IMPORTS PARA GOOGLE SHEETS
+# =====================================================
+try:
+    import gspread
+    from oauth2client.service_account import ServiceAccountCredentials
+    GOOGLE_SHEETS_AVAILABLE = True
+except ImportError:
+    GOOGLE_SHEETS_AVAILABLE = False
 
 BASE_DIR = Path(__file__).resolve().parent
 UPLOAD_DIR = BASE_DIR / "uploads"
@@ -48,6 +60,84 @@ def cargar_clientes_json():
     return {}
 
 CLIENTES = cargar_clientes_json()
+
+# =====================================================
+# FUNCIONES PARA GOOGLE SHEETS
+# =====================================================
+
+GOOGLE_CREDENTIALS_JSON = os.environ.get("GOOGLE_CREDENTIALS")
+SHEET_ID = os.environ.get("SHEET_ID", "12D-Ru8GNm0EE0NFg4kpcygqcPdqKpor9U4NOA-1TQRs")
+
+CREDENTIALS_FILE = "credentials.json"
+if GOOGLE_CREDENTIALS_JSON:
+    try:
+        creds_data = json.loads(GOOGLE_CREDENTIALS_JSON)
+        temp_creds = NamedTemporaryFile(mode='w', suffix='.json', delete=False)
+        json.dump(creds_data, temp_creds)
+        temp_creds.close()
+        CREDENTIALS_FILE = temp_creds.name
+    except:
+        pass
+
+def get_google_sheet_client():
+    if not GOOGLE_SHEETS_AVAILABLE:
+        return None
+    try:
+        if not os.path.exists(CREDENTIALS_FILE):
+            return None
+        scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+        creds = ServiceAccountCredentials.from_json_keyfile_name(CREDENTIALS_FILE, scope)
+        return gspread.authorize(creds)
+    except:
+        return None
+
+def guardar_status_en_sheets(fecha, id_tarea, status, supervisor, observaciones=""):
+    try:
+        gc = get_google_sheet_client()
+        if gc is None:
+            return False
+        sheet = gc.open_by_key(SHEET_ID)
+        try:
+            worksheet = sheet.worksheet("Status")
+        except:
+            worksheet = sheet.add_worksheet(title="Status", rows=1000, cols=10)
+            worksheet.append_row(["Fecha", "ID Tarea", "Status", "Supervisor", "Observaciones", "Fecha Revision"])
+        id_column = worksheet.col_values(2)
+        row_to_update = None
+        if id_tarea in id_column:
+            row_to_update = id_column.index(id_tarea) + 1
+        fecha_revision = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+        if row_to_update:
+            worksheet.update(f'C{row_to_update}:F{row_to_update}', [[status, supervisor, observaciones, fecha_revision]])
+        else:
+            worksheet.append_row([fecha, id_tarea, status, supervisor, observaciones, fecha_revision])
+        return True
+    except:
+        return False
+
+def get_status_from_sheets(id_tarea):
+    try:
+        gc = get_google_sheet_client()
+        if gc is None:
+            return None
+        sheet = gc.open_by_key(SHEET_ID)
+        try:
+            worksheet = sheet.worksheet("Status")
+        except:
+            return None
+        id_column = worksheet.col_values(2)
+        if id_tarea in id_column:
+            row_index = id_column.index(id_tarea) + 1
+            row_data = worksheet.row_values(row_index)
+            return {
+                "status": row_data[2] if len(row_data) > 2 else None,
+                "supervisor": row_data[3] if len(row_data) > 3 else None,
+                "observaciones": row_data[4] if len(row_data) > 4 else None,
+                "fecha_revision": row_data[5] if len(row_data) > 5 else None
+            }
+        return None
+    except:
+        return None
 
 # =====================================================
 # FUNCIONES
@@ -180,18 +270,6 @@ def api_login():
         return jsonify({"error": "Supervisor no encontrado"}), 404
     session['supervisor_id'] = supervisor_id
     session['supervisor_name'] = SUPERVISORS[supervisor_id]
-    # =========================================
-    # ELIMINADO: No buscar archivos al iniciar sesión
-    # =========================================
-    # global _cached_df, _data_loaded
-    # file_path = UPLOAD_DIR / "data.xlsx"
-    # if file_path.exists():
-    #     try:
-    #         _cached_df = _load_data(file_path)
-    #         _data_loaded = True
-    #     except Exception as e:
-    #         print(f"Error recargando datos: {e}")
-    # =========================================
     return jsonify({
         "ok": True,
         "supervisor_id": supervisor_id,
@@ -258,11 +336,8 @@ def api_tasks():
     end_date = request.args.get("end_date", type=str)
     result = _cached_df[_cached_df["Supervisor ID"] == supervisor_id].copy()
     
-    # =========================================
     # ORDENAR POR FECHA (más antiguas primero)
-    # =========================================
     result = result.sort_values(by="Fecha", ascending=True)
-    # =========================================
     
     if result.empty:
         return jsonify({"error": f"No hay tareas asignadas para {SUPERVISORS[supervisor_id]}", "no_tasks": True}), 404
@@ -309,6 +384,15 @@ def api_tasks():
         review = None
         if is_reviewed:
             review = db.get_review_status(task_id, supervisor_id)
+        
+        # LEER STATUS DESDE SHEETS
+        id_tarea = clean_text(row.get("ID Tarea", ""))
+        if id_tarea:
+            status_sheets = get_status_from_sheets(id_tarea)
+            if status_sheets:
+                is_reviewed = True
+                review = status_sheets
+        
         raw_poc_id = clean_text(row.get("POC ID"))
         short_poc_id = extract_short_poc_id(raw_poc_id)
         client_info = get_client_info(raw_poc_id)
@@ -343,17 +427,22 @@ def api_save_review():
     observaciones = data.get("observaciones", "")
     if not task_id or not status:
         return jsonify({"error": "Faltan datos"}), 400
-    if status not in ["objeccion", "invalida", "fraude"]:
+    if status not in ["objecion", "invalida", "fraude"]:
         return jsonify({"error": "Status inválido"}), 400
     if _cached_df is None or not _data_loaded:
         return jsonify({"error": "No hay datos cargados"}), 404
     task_row = _cached_df[_cached_df["task_id"] == task_id]
     if task_row.empty:
         return jsonify({"error": "Tarea no encontrada"}), 404
-    row_id = int(task_row.iloc[0]["row_id"])
+    row = task_row.iloc[0]
+    row_id = int(row["row_id"])
     supervisor_id = session['supervisor_id']
     supervisor_name = session['supervisor_name']
-    success = db.save_review(
+    fecha_tarea = formatear_fecha(row.get("Fecha"))
+    id_tarea = clean_text(row.get("ID Tarea", ""))
+    
+    # 1. Guardar en base de datos local
+    db.save_review(
         task_id=task_id,
         row_id=row_id,
         supervisor_id=supervisor_id,
@@ -363,10 +452,18 @@ def api_save_review():
         excel_file=_current_excel or "data.xlsx",
         mes_revision=_current_mes or get_mes_actual()
     )
-    if success:
-        return jsonify({"ok": True, "message": "Revisión guardada correctamente"})
-    else:
-        return jsonify({"error": "Error al guardar la revisión"}), 500
+    
+    # 2. Guardar en Google Sheets
+    if id_tarea:
+        guardar_status_en_sheets(
+            fecha=fecha_tarea,
+            id_tarea=id_tarea,
+            status=status,
+            supervisor=supervisor_name,
+            observaciones=observaciones
+        )
+    
+    return jsonify({"ok": True, "message": "Revisión guardada correctamente"})
 
 @app.route("/api/delete_review/<task_id>", methods=["DELETE"])
 @login_required
@@ -392,27 +489,53 @@ def api_delete_review(task_id):
 def api_stats():
     global _data_loaded
     supervisor_id = session['supervisor_id']
+    supervisor_name = session['supervisor_name']
     mes = _current_mes or get_mes_actual()
-    stats = db.get_supervisor_stats(supervisor_id, mes)
+    
+    # 1. OBTENER TOTAL DE TAREAS DISPONIBLES
     if not _data_loaded or _cached_df is None:
-        return jsonify({
-            "total_revisados": stats["total"],
-            "total_pendientes": 0,
-            "by_status": stats["by_status"],
-            "porcentaje": 0,
-            "no_data": True
-        })
-    total_disponibles = len(_cached_df[_cached_df["Supervisor ID"] == supervisor_id])
-    task_ids = _cached_df[_cached_df["Supervisor ID"] == supervisor_id]["task_id"].tolist()
-    pending_tasks = db.get_pending_tasks(supervisor_id, task_ids)
-    total_pendientes = len(pending_tasks)
+        total_disponibles = 0
+    else:
+        total_disponibles = len(_cached_df[_cached_df["Supervisor ID"] == supervisor_id])
+    
+    # 2. OBTENER ESTADÍSTICAS DESDE SHEETS
+    stats = {"total": 0, "by_status": {"objecion": 0, "invalida": 0, "fraude": 0}}
+    
+    try:
+        gc = get_google_sheet_client()
+        if gc:
+            sheet = gc.open_by_key(SHEET_ID)
+            try:
+                worksheet = sheet.worksheet("Status")
+                records = worksheet.get_all_records()
+                for row in records:
+                    if row.get("Supervisor") == supervisor_name:
+                        status = row.get("Status", "")
+                        stats["total"] += 1
+                        if status in stats["by_status"]:
+                            stats["by_status"][status] += 1
+            except:
+                pass
+    except:
+        pass
+    
+    # 3. CALCULAR PENDIENTES Y PROGRESO
+    total_revisados = stats["total"]
+    total_pendientes = max(0, total_disponibles - total_revisados)
+    
+    if total_disponibles > 0:
+        porcentaje = round((total_revisados / total_disponibles) * 100, 1)
+    else:
+        porcentaje = 0
+    
+    # 4. RESPUESTA
     return jsonify({
-        "total_revisados": stats["total"],
+        "total_revisados": total_revisados,
         "total_pendientes": total_pendientes,
         "by_status": stats["by_status"],
-        "porcentaje": round((stats["total"] / total_disponibles * 100) if total_disponibles > 0 else 0, 1),
+        "porcentaje": porcentaje,
         "total_disponibles": total_disponibles,
-        "has_data": True,
+        "has_data": _data_loaded,
         "mes": mes
     })
 
@@ -641,10 +764,6 @@ def api_close_month():
     except Exception as e:
         print(f"Error en cierre de mes: {e}")
         return jsonify({"error": str(e)}), 500
-
-# =====================================================
-# START
-# =====================================================
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
