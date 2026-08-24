@@ -849,11 +849,11 @@
             <div class="filters">
                 <div class="filter-group">
                     <label>Fecha Desde</label>
-                    <input type="text" id="filterStartDate" placeholder="DD/MM/YYYY">
+                    <input type="date" id="filterStartDate">
                 </div>
                 <div class="filter-group">
                     <label>Fecha Hasta</label>
-                    <input type="text" id="filterEndDate" placeholder="DD/MM/YYYY">
+                    <input type="date" id="filterEndDate">
                 </div>
                 <div class="filter-group">
                     <label>Status</label>
@@ -1067,8 +1067,17 @@
             const endDate = document.getElementById('filterEndDate').value;
             const statusFilter = document.getElementById('filterStatus').value;
             let url = '/api/tasks?';
-            if (startDate) url += `&start_date=${startDate}`;
-            if (endDate) url += `&end_date=${endDate}`;
+            if (startDate) {
+                // Convertir de YYYY-MM-DD a DD/MM/YYYY para el backend
+                const partes = startDate.split('-');
+                const fechaFormateada = `${partes[2]}/${partes[1]}/${partes[0]}`;
+                url += `&start_date=${fechaFormateada}`;
+            }
+            if (endDate) {
+                const partes = endDate.split('-');
+                const fechaFormateada = `${partes[2]}/${partes[1]}/${partes[0]}`;
+                url += `&end_date=${fechaFormateada}`;
+            }
             try {
                 const grid = document.getElementById('photoGrid');
                 grid.innerHTML = '<div class="loading">⏳ Cargando tareas...</div>';
