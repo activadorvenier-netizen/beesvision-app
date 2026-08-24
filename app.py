@@ -251,12 +251,27 @@ def _load_data(path: Path) -> pd.DataFrame:
     df = pd.read_excel(path, engine="openpyxl")
     _current_excel = path.name
     _current_mes = get_mes_actual()
-    if "TaskImageUrl" in df.columns and "Img" not in df.columns:
+    
+    # =====================================================
+    # SI NO EXISTE Img PERO EXISTE TaskImageUrl, USARLA
+    # =====================================================
+    if "Img" not in df.columns and "TaskImageUrl" in df.columns:
         df = df.rename(columns={"TaskImageUrl": "Img"})
-    required = ["Fecha", "Promotor", "POC ID", "Detalle Tarea", "Img", "Completada", "Validada", "Visita Valida", "Supervisor ID"]
+        print("✅ Renombrado TaskImageUrl -> Img")
+    
+    # SI NO EXISTE NINGUNA, CREARLA VACÍA
+    if "Img" not in df.columns:
+        df["Img"] = ""
+        print("⚠️ Columna Img creada vacía")
+    # =====================================================
+    
+    required = ["Fecha", "Promotor", "POC ID", "Detalle Tarea", "Completada", "Validada", "Visita Valida", "Supervisor ID"]
+    
+    # Verificar columnas requeridas (Img ya no es requerida porque la creamos)
     missing = [c for c in required if c not in df.columns]
     if missing:
         raise ValueError(f"Columnas faltantes: {missing}")
+    
     df = df.copy()
     df["Completada"] = pd.to_numeric(df["Completada"], errors="coerce")
     df["Validada"] = pd.to_numeric(df["Validada"], errors="coerce")
