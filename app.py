@@ -762,6 +762,52 @@ def api_supervisors():
 # ENDPOINTS DE PRUEBA
 # =====================================================
 
+@app.route("/api/test_tasks_direct")
+@login_required
+def test_tasks_direct():
+    """Prueba directa de api_tasks sin try/except"""
+    global _cached_df, _data_loaded
+    
+    print("🔍 TEST DIRECT: Iniciando...")
+    print(f"📊 _data_loaded: {_data_loaded}")
+    print(f"📊 _cached_df is None: {_cached_df is None}")
+    
+    if _cached_df is not None:
+        print(f"📊 _cached_df columns: {_cached_df.columns.tolist()}")
+        print(f"📊 _cached_df rows: {len(_cached_df)}")
+    
+    # Verificar datos
+    if not _data_loaded or _cached_df is None or _cached_df.empty:
+        return jsonify({"error": "No hay datos cargados", "status": "no_data"})
+    
+    supervisor_id = session.get('supervisor_id')
+    print(f"👤 Supervisor ID: {supervisor_id}")
+    
+    # Filtrar por supervisor
+    result = _cached_df[_cached_df["Supervisor ID"] == supervisor_id].copy()
+    print(f"📊 Tareas del supervisor: {len(result)}")
+    
+    if result.empty:
+        return jsonify({"error": "No hay tareas para este supervisor", "status": "empty"})
+    
+    # Devolver datos básicos SIN acceder a Sheets
+    tareas = []
+    for _, row in result.iterrows():
+        tareas.append({
+            "row_id": int(row["row_id"]),
+            "task_id": row["task_id"],
+            "promotor": clean_text(row.get("Promotor")),
+            "fecha": formatear_fecha(row.get("Fecha")),
+            "poc_id": extract_short_poc_id(clean_text(row.get("POC ID"))),
+            "detalle": clean_text(row.get("Detalle Tarea", "")),
+            "imagen": clean_text(row.get("Img", ""))
+        })
+    
+    return jsonify({
+        "total": len(tareas),
+        "tareas": tareas[:10]
+    })
+
 @app.route("/api/test_guardar")
 @login_required
 def test_guardar():
