@@ -1,4 +1,4 @@
-# app.py - VERSIÓN DEFINITIVA
+# app.py - VERSIÓN DEFINITIVA CON ARCHIVO EN UPLOADS
 from __future__ import annotations
 from pathlib import Path
 from typing import Any
@@ -41,8 +41,12 @@ SUPERVISORS = {
 app = Flask(__name__)
 app.secret_key = "clave_secreta_para_desarrollo"
 
+_cached_df = None
+_data_loaded = False
+_current_mes = None
+
 # =====================================================
-# CONFIGURACIÓN DE GOOGLE SHEETS CON VARIABLES DE ENTORNO
+# CONFIGURACIÓN DE GOOGLE SHEETS
 # =====================================================
 
 GOOGLE_CREDENTIALS_JSON = os.environ.get("GOOGLE_CREDENTIALS")
@@ -91,7 +95,7 @@ def cargar_clientes_json():
 CLIENTES = cargar_clientes_json()
 
 # =====================================================
-# FUNCIONES PARA GOOGLE SHEETS - HOJA STATUS
+# FUNCIONES PARA GOOGLE SHEETS
 # =====================================================
 
 def get_google_sheet_client():
@@ -332,19 +336,6 @@ def api_login():
     session['supervisor_id'] = supervisor_id
     session['supervisor_name'] = SUPERVISORS[supervisor_id]
     
-    # Cargar datos desde la base de datos si existen
-    try:
-        df, mes, fecha = db.cargar_datos_excel(supervisor_id)
-        if df is not None:
-            # Guardar en la variable global para que api_tasks() pueda usarlo
-            global _cached_df, _data_loaded, _current_mes
-            _cached_df = df
-            _data_loaded = True
-            _current_mes = mes
-            print(f"✅ Datos cargados desde base de datos: {len(df)} filas")
-    except Exception as e:
-        print(f"⚠️ Error cargando datos desde base de datos: {e}")
-    
     return jsonify({
         "ok": True,
         "supervisor_id": supervisor_id,
@@ -360,15 +351,12 @@ def api_logout():
 @login_required
 def api_has_file():
     global _data_loaded
-    # Verificar si hay datos en la base de datos
-    supervisor_id = session.get('supervisor_id')
-    df, mes, fecha = db.cargar_datos_excel(supervisor_id)
-    has_data = df is not None and not df.empty
-    
+    file_exists = (UPLOAD_DIR / "data.xlsx").exists()
     return jsonify({
-        "has_file": has_data,
-        "data_loaded": has_data,
-        "mes_actual": mes
+        "has_file": file_exists and _data_loaded,
+        "file_exists": file_exists,
+        "data_loaded": _data_loaded,
+        "mes_actual": _current_mes
     })
 
 @app.route("/api/upload", methods=["POST"])
@@ -383,26 +371,16 @@ def api_upload():
     if not f.filename.lower().endswith(".xlsx"):
         return jsonify({"error": "El archivo debe ser .xlsx"}), 400
     
-    # Guardar archivo temporalmente
     file_path = UPLOAD_DIR / "data.xlsx"
     f.save(str(file_path))
     
     try:
         print(f"📂 Procesando archivo subido: {file_path}")
-        supervisor_id = session['supervisor_id']
-        _current_mes = get_mes_actual()
-        
-        # Cargar y procesar el archivo
         _cached_df = _load_data(file_path)
         _data_loaded = True
+        _current_mes = get_mes_actual()
         
-        # Guardar en la base de datos
-        success = db.guardar_datos_excel(supervisor_id, _cached_df, _current_mes)
-        
-        if success:
-            print(f"✅ Archivo guardado en base de datos: {len(_cached_df)} filas")
-        else:
-            print("❌ Error guardando en base de datos")
+        print(f"✅ Archivo procesado: {len(_cached_df)} filas")
         
         return jsonify({
             "ok": True,
@@ -424,16 +402,21 @@ def api_tasks():
     global _cached_df, _data_loaded
     
     try:
-        # Si no hay datos cargados en memoria, intentar cargar desde la base de datos
+        print("🔍 INICIO api_tasks")
+        print(f"📊 _data_loaded: {_data_loaded}")
+        print(f"📊 _cached_df is None: {_cached_df is None}")
+        
         if not _data_loaded or _cached_df is None or _cached_df.empty:
-            supervisor_id = session.get('supervisor_id')
-            df, mes, fecha = db.cargar_datos_excel(supervisor_id)
-            
-            if df is not None and not df.empty:
-                _cached_df = df
-                _data_loaded = True
-                _current_mes = mes
-                print(f"✅ Datos cargados desde base de datos: {len(df)} filas")
+            file_path = UPLOAD_DIR / "data.xlsx"
+            if file_path.exists():
+                try:
+                    print("🔄 Cargando archivo existente...")
+                    _cached_df = _load_data(file_path)
+                    _data_loaded = True
+                    print(f"✅ Datos cargados: {len(_cached_df)} filas")
+                except Exception as e:
+                    print(f"❌ Error cargando archivo: {e}")
+                    return jsonify({"error": f"Error cargando datos: {str(e)}", "no_data": True}), 404
             else:
                 return jsonify({"error": "No hay datos cargados. Sube un archivo Excel.", "no_data": True}), 404
         
@@ -462,10 +445,6 @@ def api_tasks():
                 result = result.drop(columns=['fecha_dt'])
             except Exception as e:
                 print(f"⚠️ Error en filtros: {e}")
-                if start_date:
-                    result = result[result["Fecha"].astype(str) >= start_date]
-                if end_date:
-                    result = result[result["Fecha"].astype(str) <= end_date]
         
         if result.empty:
             return jsonify({"error": "No hay tareas en el rango de fechas", "no_tasks": True}), 404
@@ -478,7 +457,6 @@ def api_tasks():
             if not img_url:
                 img_url = clean_text(row.get("TaskImageUrl", ""))
             
-            # Leer status desde Sheets
             try:
                 status_sheets = get_status_from_sheets(img_url)
             except Exception as e:
@@ -518,6 +496,7 @@ def api_tasks():
                 "fecha_revision": review.get("fecha_revision") if review else None
             })
         
+        print(f"✅ Respondiendo con {len(response_rows)} tareas")
         return jsonify(response_rows)
         
     except Exception as e:
@@ -555,7 +534,6 @@ def api_save_review():
     if not img_url:
         img_url = clean_text(row.get("TaskImageUrl", ""))
     
-    # Guardar en Google Sheets
     success = guardar_status_en_sheets(
         fecha=fecha_tarea,
         id_imagen=img_url,

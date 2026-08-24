@@ -3,10 +3,7 @@ import sqlite3
 from datetime import datetime
 from typing import Optional, List, Dict
 from pathlib import Path
-import pandas as pd
-import json
 
-# Obtener la ruta ABSOLUTA del directorio del proyecto
 BASE_DIR = Path(__file__).resolve().parent
 
 class ReviewDatabase:
@@ -18,10 +15,8 @@ class ReviewDatabase:
         self._init_db()
     
     def _init_db(self):
-        """Crear tablas necesarias si no existen"""
         with sqlite3.connect(self.db_path) as conn:
             conn.executescript("""
-                -- Tabla de revisiones
                 CREATE TABLE IF NOT EXISTS reviews (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     task_id TEXT NOT NULL,
@@ -41,16 +36,6 @@ class ReviewDatabase:
                 CREATE INDEX IF NOT EXISTS idx_status ON reviews(status);
                 CREATE INDEX IF NOT EXISTS idx_mes ON reviews(mes_revision);
                 
-                -- Tabla para guardar los datos del Excel
-                CREATE TABLE IF NOT EXISTS excel_data (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    supervisor_id INTEGER NOT NULL,
-                    data_json TEXT NOT NULL,
-                    fecha_carga DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    mes_revision TEXT,
-                    UNIQUE(supervisor_id)
-                );
-                
                 CREATE TABLE IF NOT EXISTS uploaded_files (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     filename TEXT NOT NULL,
@@ -62,80 +47,9 @@ class ReviewDatabase:
             """)
             print("✅ Base de datos inicializada")
     
-    # =====================================================
-    # FUNCIONES PARA GUARDAR/CARGAR EXCEL
-    # =====================================================
-    
-    def guardar_datos_excel(self, supervisor_id: int, df: pd.DataFrame, mes_revision: str) -> bool:
-        """Guardar los datos del Excel en la base de datos"""
-        try:
-            data_json = df.to_json(orient='records', date_format='iso')
-            
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                cursor.execute("""
-                    INSERT OR REPLACE INTO excel_data 
-                    (supervisor_id, data_json, mes_revision, fecha_carga)
-                    VALUES (?, ?, ?, CURRENT_TIMESTAMP)
-                """, (supervisor_id, data_json, mes_revision))
-                conn.commit()
-                print(f"✅ Datos Excel guardados para supervisor {supervisor_id}: {len(df)} filas")
-                return True
-        except Exception as e:
-            print(f"❌ Error guardando datos Excel: {e}")
-            import traceback
-            traceback.print_exc()
-            return False
-    
-    def cargar_datos_excel(self, supervisor_id: int):
-        """Cargar los datos del Excel desde la base de datos"""
-        try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                cursor.execute("""
-                    SELECT data_json, mes_revision, fecha_carga
-                    FROM excel_data
-                    WHERE supervisor_id = ?
-                """, (supervisor_id,))
-                row = cursor.fetchone()
-                
-                if row:
-                    data_json, mes_revision, fecha_carga = row
-                    df = pd.read_json(data_json, orient='records')
-                    print(f"✅ Datos Excel cargados para supervisor {supervisor_id}: {len(df)} filas")
-                    return df, mes_revision, fecha_carga
-                print(f"ℹ️ No hay datos Excel para supervisor {supervisor_id}")
-                return None, None, None
-        except Exception as e:
-            print(f"❌ Error cargando datos Excel: {e}")
-            import traceback
-            traceback.print_exc()
-            return None, None, None
-    
-    def eliminar_datos_excel(self, supervisor_id: int) -> bool:
-        """Eliminar los datos del Excel de la base de datos"""
-        try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                cursor.execute("""
-                    DELETE FROM excel_data
-                    WHERE supervisor_id = ?
-                """, (supervisor_id,))
-                conn.commit()
-                print(f"✅ Datos Excel eliminados para supervisor {supervisor_id}")
-                return True
-        except Exception as e:
-            print(f"❌ Error eliminando datos Excel: {e}")
-            return False
-    
-    # =====================================================
-    # FUNCIONES EXISTENTES
-    # =====================================================
-    
     def save_review(self, task_id: str, row_id: int, supervisor_id: int, 
                     supervisor_name: str, status: str, observaciones: str = "",
                     excel_file: str = "", mes_revision: str = "") -> bool:
-        """Guardar o actualizar una revisión"""
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
@@ -172,7 +86,6 @@ class ReviewDatabase:
             return False
     
     def get_review_status(self, task_id: str, supervisor_id: int) -> Optional[Dict]:
-        """Obtener el estado de una revisión"""
         try:
             with sqlite3.connect(self.db_path) as conn:
                 conn.row_factory = sqlite3.Row
@@ -190,7 +103,6 @@ class ReviewDatabase:
             return None
     
     def get_supervisor_stats(self, supervisor_id: int, mes: str = None) -> Dict:
-        """Estadísticas de un supervisor (opcionalmente por mes)"""
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
@@ -232,7 +144,6 @@ class ReviewDatabase:
             return {"total": 0, "by_status": {}}
     
     def get_all_reviews(self, supervisor_id: Optional[int] = None, mes: str = None) -> List[Dict]:
-        """Obtener todas las revisiones (opcionalmente filtradas)"""
         try:
             with sqlite3.connect(self.db_path) as conn:
                 conn.row_factory = sqlite3.Row
@@ -262,7 +173,6 @@ class ReviewDatabase:
             return []
     
     def get_pending_tasks(self, supervisor_id: int, task_ids: List[str]) -> List[str]:
-        """Obtener tareas pendientes de revisión"""
         if not task_ids:
             return []
         
@@ -285,7 +195,6 @@ class ReviewDatabase:
             return task_ids
     
     def clear_reviews(self, supervisor_id: int, mes: str = None) -> bool:
-        """Eliminar revisiones de un supervisor (opcionalmente por mes)"""
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
@@ -308,7 +217,6 @@ class ReviewDatabase:
             return False
     
     def delete_review(self, task_id: str, supervisor_id: int) -> bool:
-        """Eliminar una revisión específica"""
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
