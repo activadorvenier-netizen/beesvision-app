@@ -44,31 +44,6 @@ _data_loaded = False
 _current_mes = None
 
 # =====================================================
-# CONFIGURACIÓN DE GOOGLE SHEETS
-# =====================================================
-
-GOOGLE_CREDENTIALS_JSON = os.environ.get("GOOGLE_CREDENTIALS")
-SHEET_ID = os.environ.get("SHEET_ID", "12D-Ru8GNm0EE0NFg4kpcygqcPdqKpor9U4NOA-1TQRs")
-SHEET_NAME = os.environ.get("SHEET_NAME", "Clientes")
-
-CREDENTIALS_FILE = "credentials.json"
-if GOOGLE_CREDENTIALS_JSON:
-    try:
-        creds_data = json.loads(GOOGLE_CREDENTIALS_JSON)
-        temp_creds = NamedTemporaryFile(mode='w', suffix='.json', delete=False)
-        json.dump(creds_data, temp_creds)
-        temp_creds.close()
-        CREDENTIALS_FILE = temp_creds.name
-    except:
-        pass
-
-GOOGLE_SHEETS_CONFIG = {
-    "sheet_id": SHEET_ID,
-    "sheet_name": SHEET_NAME,
-    "credentials_file": CREDENTIALS_FILE
-}
-
-# =====================================================
 # CARGAR CLIENTES DESDE JSON
 # =====================================================
 
@@ -87,60 +62,76 @@ def cargar_clientes_json():
 CLIENTES = cargar_clientes_json()
 
 # =====================================================
-# NUEVAS FUNCIONES PARA GOOGLE SHEETS (SOLO ESTO SE AGREGA)
+# NUEVAS FUNCIONES PARA GOOGLE SHEETS
 # =====================================================
+
+# Configuración de Google Sheets
+GOOGLE_CREDENTIALS_JSON = os.environ.get("GOOGLE_CREDENTIALS")
+SHEET_ID = os.environ.get("SHEET_ID", "12D-Ru8GNm0EE0NFg4kpcygqcPdqKpor9U4NOA-1TQRs")
+
+CREDENTIALS_FILE = "credentials.json"
+if GOOGLE_CREDENTIALS_JSON:
+    try:
+        creds_data = json.loads(GOOGLE_CREDENTIALS_JSON)
+        temp_creds = NamedTemporaryFile(mode='w', suffix='.json', delete=False)
+        json.dump(creds_data, temp_creds)
+        temp_creds.close()
+        CREDENTIALS_FILE = temp_creds.name
+    except:
+        pass
 
 def get_google_sheet_client():
     if not GOOGLE_SHEETS_AVAILABLE:
         return None
     try:
-        if not os.path.exists(GOOGLE_SHEETS_CONFIG["credentials_file"]):
+        if not os.path.exists(CREDENTIALS_FILE):
             return None
         scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-        creds = ServiceAccountCredentials.from_json_keyfile_name(
-            GOOGLE_SHEETS_CONFIG["credentials_file"], scope
-        )
+        creds = ServiceAccountCredentials.from_json_keyfile_name(CREDENTIALS_FILE, scope)
         return gspread.authorize(creds)
     except:
         return None
 
-def guardar_status_en_sheets(fecha, id_imagen, status, supervisor, observaciones=""):
+def guardar_status_en_sheets(fecha, id_tarea, status, supervisor, observaciones=""):
+    """Guardar en hoja 'Status' de Sheets: Fecha, ID Tarea, Status, Supervisor, Observaciones, Fecha Revision"""
     try:
         gc = get_google_sheet_client()
         if gc is None:
             return False
         
-        sheet = gc.open_by_key(GOOGLE_SHEETS_CONFIG["sheet_id"])
+        sheet = gc.open_by_key(SHEET_ID)
         
         try:
             worksheet = sheet.worksheet("Status")
         except:
             worksheet = sheet.add_worksheet(title="Status", rows=1000, cols=10)
-            worksheet.append_row(["Fecha", "ID", "Status", "Supervisor", "Observaciones", "Fecha Revision"])
+            worksheet.append_row(["Fecha", "ID Tarea", "Status", "Supervisor", "Observaciones", "Fecha Revision"])
         
+        # Buscar por ID Tarea (columna B)
         id_column = worksheet.col_values(2)
         row_to_update = None
-        if id_imagen in id_column:
-            row_to_update = id_column.index(id_imagen) + 1
+        if id_tarea in id_column:
+            row_to_update = id_column.index(id_tarea) + 1
         
         fecha_revision = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
         
         if row_to_update:
             worksheet.update(f'C{row_to_update}:F{row_to_update}', [[status, supervisor, observaciones, fecha_revision]])
         else:
-            worksheet.append_row([fecha, id_imagen, status, supervisor, observaciones, fecha_revision])
+            worksheet.append_row([fecha, id_tarea, status, supervisor, observaciones, fecha_revision])
         
         return True
     except:
         return False
 
-def get_status_from_sheets(id_imagen):
+def get_status_from_sheets(id_tarea):
+    """Leer status desde hoja 'Status' de Sheets por ID Tarea"""
     try:
         gc = get_google_sheet_client()
         if gc is None:
             return None
         
-        sheet = gc.open_by_key(GOOGLE_SHEETS_CONFIG["sheet_id"])
+        sheet = gc.open_by_key(SHEET_ID)
         
         try:
             worksheet = sheet.worksheet("Status")
@@ -148,8 +139,8 @@ def get_status_from_sheets(id_imagen):
             return None
         
         id_column = worksheet.col_values(2)
-        if id_imagen in id_column:
-            row_index = id_column.index(id_imagen) + 1
+        if id_tarea in id_column:
+            row_index = id_column.index(id_tarea) + 1
             row_data = worksheet.row_values(row_index)
             return {
                 "status": row_data[2] if len(row_data) > 2 else None,
@@ -251,27 +242,12 @@ def _load_data(path: Path) -> pd.DataFrame:
     df = pd.read_excel(path, engine="openpyxl")
     _current_excel = path.name
     _current_mes = get_mes_actual()
-    
-    # =====================================================
-    # SI NO EXISTE Img PERO EXISTE TaskImageUrl, USARLA
-    # =====================================================
-    if "Img" not in df.columns and "TaskImageUrl" in df.columns:
+    if "TaskImageUrl" in df.columns and "Img" not in df.columns:
         df = df.rename(columns={"TaskImageUrl": "Img"})
-        print("✅ Renombrado TaskImageUrl -> Img")
-    
-    # SI NO EXISTE NINGUNA, CREARLA VACÍA
-    if "Img" not in df.columns:
-        df["Img"] = ""
-        print("⚠️ Columna Img creada vacía")
-    # =====================================================
-    
-    required = ["Fecha", "Promotor", "POC ID", "Detalle Tarea", "Completada", "Validada", "Visita Valida", "Supervisor ID"]
-    
-    # Verificar columnas requeridas (Img ya no es requerida porque la creamos)
+    required = ["Fecha", "Promotor", "POC ID", "Detalle Tarea", "Img", "Completada", "Validada", "Visita Valida", "Supervisor ID"]
     missing = [c for c in required if c not in df.columns]
     if missing:
         raise ValueError(f"Columnas faltantes: {missing}")
-    
     df = df.copy()
     df["Completada"] = pd.to_numeric(df["Completada"], errors="coerce")
     df["Validada"] = pd.to_numeric(df["Validada"], errors="coerce")
@@ -292,7 +268,7 @@ def _load_data(path: Path) -> pd.DataFrame:
     return filtered
 
 # =====================================================
-# ROUTES (SOLO CAMBIOS EN tasks, save_review Y stats)
+# ROUTES
 # =====================================================
 
 @app.route("/")
@@ -409,19 +385,23 @@ def api_tasks():
         if is_reviewed:
             review = db.get_review_status(task_id, supervisor_id)
         
-        # === LEER STATUS DESDE SHEETS (SIEMPRE PRIORIDAD) ===
-        img_url = clean_text(row.get("Img", ""))
-        if not img_url:
-            img_url = clean_text(row.get("TaskImageUrl", ""))
-        status_sheets = get_status_from_sheets(img_url)
-        if status_sheets:
-            is_reviewed = True
-            review = status_sheets
-        # =================================================
+        # =========================================================
+        # LEER STATUS DESDE SHEETS USANDO ID Tarea
+        # =========================================================
+        id_tarea = clean_text(row.get("ID Tarea", ""))
+        if id_tarea:
+            status_sheets = get_status_from_sheets(id_tarea)
+            if status_sheets:
+                is_reviewed = True
+                review = status_sheets
+        # =========================================================
         
         raw_poc_id = clean_text(row.get("POC ID"))
         short_poc_id = extract_short_poc_id(raw_poc_id)
         client_info = get_client_info(raw_poc_id)
+        img_url = clean_text(row.get("Img", ""))
+        if not img_url:
+            img_url = clean_text(row.get("TaskImageUrl", ""))
         
         response_rows.append({
             "row_id": int(row["row_id"]),
@@ -452,7 +432,7 @@ def api_save_review():
     observaciones = data.get("observaciones", "")
     if not task_id or not status:
         return jsonify({"error": "Faltan datos"}), 400
-    if status not in ["objecion", "invalida", "fraude"]:
+    if status not in ["objeccion", "invalida", "fraude"]:
         return jsonify({"error": "Status inválido"}), 400
     if _cached_df is None or not _data_loaded:
         return jsonify({"error": "No hay datos cargados"}), 404
@@ -466,10 +446,12 @@ def api_save_review():
     supervisor_id = session['supervisor_id']
     supervisor_name = session['supervisor_name']
     
+    # =========================================================
+    # OBTENER DATOS PARA GUARDAR EN SHEETS
+    # =========================================================
     fecha_tarea = formatear_fecha(row.get("Fecha"))
-    img_url = clean_text(row.get("Img", ""))
-    if not img_url:
-        img_url = clean_text(row.get("TaskImageUrl", ""))
+    id_tarea = clean_text(row.get("ID Tarea", ""))
+    # =========================================================
     
     # 1. Guardar en base de datos local (respaldo)
     db.save_review(
@@ -484,13 +466,14 @@ def api_save_review():
     )
     
     # 2. Guardar en Google Sheets (hoja Status)
-    guardar_status_en_sheets(
-        fecha=fecha_tarea,
-        id_imagen=img_url,
-        status=status,
-        supervisor=supervisor_name,
-        observaciones=observaciones
-    )
+    if id_tarea:
+        guardar_status_en_sheets(
+            fecha=fecha_tarea,
+            id_tarea=id_tarea,
+            status=status,
+            supervisor=supervisor_name,
+            observaciones=observaciones
+        )
     
     return jsonify({"ok": True, "message": "Revisión guardada correctamente"})
 
@@ -521,14 +504,15 @@ def api_stats():
     supervisor_name = session['supervisor_name']
     mes = _current_mes or get_mes_actual()
     
-    # Estadísticas desde base local
     stats = db.get_supervisor_stats(supervisor_id, mes)
     
-    # Sumar estadísticas desde Sheets
+    # =========================================================
+    # SUMAR STATUS DESDE SHEETS
+    # =========================================================
     try:
         gc = get_google_sheet_client()
         if gc:
-            sheet = gc.open_by_key(GOOGLE_SHEETS_CONFIG["sheet_id"])
+            sheet = gc.open_by_key(SHEET_ID)
             try:
                 worksheet = sheet.worksheet("Status")
                 records = worksheet.get_all_records()
@@ -542,6 +526,7 @@ def api_stats():
                 pass
     except:
         pass
+    # =========================================================
     
     if not _data_loaded or _cached_df is None:
         return jsonify({
@@ -573,7 +558,7 @@ def api_supervisors():
     return jsonify(items)
 
 # =====================================================
-# EXPORTAR REVISIONES (IGUAL)
+# EXPORTAR REVISIONES
 # =====================================================
 
 @app.route("/api/export_reviews", methods=["GET"])
@@ -678,7 +663,7 @@ def api_export_reviews():
         return jsonify({"error": str(e)}), 500
 
 # =====================================================
-# CIERRE DE MES (IGUAL)
+# CIERRE DE MES
 # =====================================================
 
 @app.route("/api/close_month", methods=["POST"])
