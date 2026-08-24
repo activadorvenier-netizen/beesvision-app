@@ -774,5 +774,43 @@ def debug_tasks():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@app.route("/api/tasks_simple")
+@login_required
+def tasks_simple():
+    """Versión simple de tasks para debug"""
+    try:
+        global _cached_df, _data_loaded
+        
+        # Verificar datos cargados
+        if not _data_loaded or _cached_df is None or _cached_df.empty:
+            return jsonify({"error": "No hay datos cargados", "status": "no_data"})
+        
+        supervisor_id = session.get('supervisor_id')
+        
+        # Filtrar por supervisor
+        result = _cached_df[_cached_df["Supervisor ID"] == supervisor_id].copy()
+        
+        if result.empty:
+            return jsonify({"error": "No hay tareas", "status": "empty"})
+        
+        # Devolver solo datos básicos (sin Sheets)
+        tareas = []
+        for _, row in result.iterrows():
+            tareas.append({
+                "row_id": int(row["row_id"]),
+                "task_id": row["task_id"],
+                "promotor": clean_text(row.get("Promotor")),
+                "fecha": formatear_fecha(row.get("Fecha")),
+                "imagen": clean_text(row.get("Img", ""))
+            })
+        
+        return jsonify({"total": len(tareas), "tareas": tareas[:5]})
+        
+    except Exception as e:
+        import traceback
+        error = traceback.format_exc()
+        print(f"❌ Error: {error}")
+        return jsonify({"error": str(e), "trace": error}), 500
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
