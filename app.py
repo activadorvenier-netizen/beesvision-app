@@ -377,7 +377,7 @@ def api_tasks():
             pass
     if end_date:
         try:
-            result = result[result["Fecha"].astype(str) <= end_date)
+            result = result[result["Fecha"].astype(str) <= end_date]
         except:
             pass
     if result.empty:
