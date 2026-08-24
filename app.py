@@ -576,33 +576,36 @@ def api_supervisors():
 @login_required
 def api_export_reviews():
     try:
-        supervisor_id = session.get('supervisor_id')
-        supervisor_name = session.get('supervisor_name')
-        mes = _current_mes or get_mes_actual()
+        supervisor_name = session['supervisor_name']
         
-        reviews = db.get_all_reviews(supervisor_id, mes)
+        # =========================================================
+        # LEER TODOS LOS STATUS DESDE GOOGLE SHEETS
+        # =========================================================
+        gc = get_google_sheet_client()
+        if gc is None:
+            return jsonify({"error": "No se pudo conectar a Google Sheets"}), 500
         
-        if not reviews:
+        sheet = gc.open_by_key(SHEET_ID)
+        try:
+            worksheet = sheet.worksheet("Status")
+            records = worksheet.get_all_records()
+        except:
             return jsonify({"error": "No hay revisiones para exportar"}), 404
         
-        if _cached_df is None or not _data_loaded:
-            export_data = []
-            for review in reviews:
-                export_data.append({
-                    "Fecha": "",
-                    "Cliente ID": "",
-                    "Razón Social": "",
-                    "Direccion": "",
-                    "Tarea": "",
-                    "Status": review["status"],
-                    "Observación": review.get("observaciones", ""),
-                    "Imagen": "",
-                    "Supervisor": review["supervisor_name"],
-                    "Fecha Revisión": review["fecha_revision"]
-                })
-            df_export = pd.DataFrame(export_data)
-        else:
-            task_data = {}
+        # Filtrar por supervisor
+        revisiones = []
+        for row in records:
+            if row.get("Supervisor") == supervisor_name:
+                revisiones.append(row)
+        
+        if not revisiones:
+            return jsonify({"error": "No hay revisiones para exportar"}), 404
+        
+        # =========================================================
+        # OBTENER DATOS DEL EXCEL PARA ENRIQUECER EL REPORTE
+        # =========================================================
+        task_data = {}
+        if _cached_df is not None and _data_loaded:
             for _, row in _cached_df.iterrows():
                 raw_poc_id = clean_text(row.get("POC ID", ""))
                 short_poc_id = extract_short_poc_id(raw_poc_id)
@@ -620,26 +623,27 @@ def api_export_reviews():
                     "detalle_tarea": row.get("Detalle Tarea", ""),
                     "imagen": img_url
                 }
-            
-            export_data = []
-            for review in reviews:
-                task_id = review["task_id"]
-                task_info = task_data.get(task_id, {})
-                
-                export_data.append({
-                    "Fecha": task_info.get("fecha", ""),
-                    "Cliente ID": task_info.get("poc_id_completo", ""),
-                    "Razón Social": task_info.get("razon_social", ""),
-                    "Direccion": task_info.get("direccion", ""),
-                    "Tarea": task_info.get("detalle_tarea", ""),
-                    "Status": review["status"],
-                    "Observación": review.get("observaciones", ""),
-                    "Imagen": task_info.get("imagen", ""),
-                    "Supervisor": review["supervisor_name"],
-                    "Fecha Revisión": review["fecha_revision"]
-                })
-            df_export = pd.DataFrame(export_data)
+        # =========================================================
         
+        export_data = []
+        for rev in revisiones:
+            id_tarea = rev.get("ID Tarea", "")
+            task_info = task_data.get(id_tarea, {})
+            
+            export_data.append({
+                "Fecha": rev.get("Fecha", ""),
+                "Cliente ID": task_info.get("poc_id_completo", ""),
+                "Razón Social": task_info.get("razon_social", ""),
+                "Direccion": task_info.get("direccion", ""),
+                "Tarea": task_info.get("detalle_tarea", ""),
+                "Status": rev.get("Status", ""),
+                "Observación": rev.get("Observaciones", ""),
+                "Imagen": task_info.get("imagen", ""),
+                "Supervisor": rev.get("Supervisor", ""),
+                "Fecha Revisión": rev.get("Fecha Revision", "")
+            })
+        
+        df_export = pd.DataFrame(export_data)
         output = io.BytesIO()
         
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
@@ -660,7 +664,7 @@ def api_export_reviews():
                     worksheet.column_dimensions[column_letter].width = adjusted_width
         
         output.seek(0)
-        filename = f"reporte_revisiones_{supervisor_name}_{mes}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+        filename = f"reporte_revisiones_{supervisor_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
         
         return send_file(
             output,
