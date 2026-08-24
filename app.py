@@ -409,14 +409,19 @@ def api_login():
     session['supervisor_id'] = supervisor_id
     session['supervisor_name'] = SUPERVISORS[supervisor_id]
     
-    global _cached_df, _data_loaded
-    file_path = UPLOAD_DIR / "data.xlsx"
-    if file_path.exists():
-        try:
-            _cached_df = _load_data(file_path)
-            _data_loaded = True
-        except Exception as e:
-            print(f"Error recargando datos: {e}")
+    # =====================================================
+    # ELIMINADO: No cargar archivo automáticamente
+    # Ahora el supervisor debe subir un archivo cada vez
+    # =====================================================
+    # global _cached_df, _data_loaded
+    # file_path = UPLOAD_DIR / "data.xlsx"
+    # if file_path.exists():
+    #     try:
+    #         _cached_df = _load_data(file_path)
+    #         _data_loaded = True
+    #     except Exception as e:
+    #         print(f"Error recargando datos: {e}")
+    # =====================================================
     
     return jsonify({
         "ok": True,
@@ -457,9 +462,12 @@ def api_upload():
     f.save(str(file_path))
     
     try:
+        print(f"📂 Procesando archivo subido: {file_path}")
         _cached_df = _load_data(file_path)
         _data_loaded = True
         _current_mes = get_mes_actual()
+        
+        print(f"✅ Archivo procesado: {len(_cached_df)} filas")
         
         return jsonify({
             "ok": True,
@@ -468,6 +476,9 @@ def api_upload():
             "mes": _current_mes
         })
     except Exception as e:
+        print(f"❌ Error al procesar archivo: {e}")
+        import traceback
+        traceback.print_exc()
         _cached_df = None
         _data_loaded = False
         return jsonify({"error": str(e)}), 500
@@ -478,33 +489,36 @@ def api_tasks():
     global _cached_df, _data_loaded
     
     try:
-        print("🔍 Cargando tareas...")
+        print("=" * 50)
+        print("🔍 INICIO api_tasks")
+        print(f"📊 _data_loaded: {_data_loaded}")
+        print(f"📊 _cached_df is None: {_cached_df is None}")
         
+        # =====================================================
+        # SI NO HAY DATOS CARGADOS, DEVOLVER ERROR
+        # EL SUPERVISOR DEBE SUBIR UN ARCHIVO PRIMERO
+        # =====================================================
         if not _data_loaded or _cached_df is None or _cached_df.empty:
-            file_path = UPLOAD_DIR / "data.xlsx"
-            if file_path.exists():
-                try:
-                    _cached_df = _load_data(file_path)
-                    _data_loaded = True
-                    print(f"✅ Datos cargados desde archivo existente: {len(_cached_df)} tareas")
-                except Exception as e:
-                    print(f"❌ Error cargando datos: {e}")
-                    return jsonify({"error": f"Error cargando datos: {str(e)}", "no_data": True}), 404
-            else:
-                return jsonify({"error": "No hay datos cargados. Sube un archivo Excel.", "no_data": True}), 404
+            return jsonify({
+                "error": "No hay datos cargados. Debes subir un archivo Excel primero.",
+                "no_data": True
+            }), 404
+        # =====================================================
         
-        supervisor_id = session['supervisor_id']
+        supervisor_id = session.get('supervisor_id')
+        supervisor_name = SUPERVISORS.get(supervisor_id, "Desconocido")
+        print(f"👤 Supervisor ID: {supervisor_id}, Nombre: {supervisor_name}")
+        
         start_date = request.args.get("start_date", type=str)
         end_date = request.args.get("end_date", type=str)
-        
-        print(f"👤 Supervisor: {SUPERVISORS[supervisor_id]}")
         print(f"📅 Filtros: desde={start_date}, hasta={end_date}")
         
+        print(f"📊 Filtrando por Supervisor ID = {supervisor_id}")
         result = _cached_df[_cached_df["Supervisor ID"] == supervisor_id].copy()
         print(f"📊 Tareas del supervisor: {len(result)}")
         
         if result.empty:
-            return jsonify({"error": f"No hay tareas asignadas para {SUPERVISORS[supervisor_id]}", "no_tasks": True}), 404
+            return jsonify({"error": f"No hay tareas asignadas para {supervisor_name}", "no_tasks": True}), 404
         
         result = result.sort_values(by="Fecha", ascending=True)
         
@@ -529,58 +543,67 @@ def api_tasks():
         if result.empty:
             return jsonify({"error": "No hay tareas en el rango de fechas", "no_tasks": True}), 404
         
+        print("🔄 Construyendo respuesta...")
         response_rows = []
+        
         for _, row in result.iterrows():
-            task_id = row["task_id"]
-            
-            img_url = clean_text(row.get("Img", ""))
-            if not img_url:
-                img_url = clean_text(row.get("TaskImageUrl", ""))
-            
             try:
-                status_sheets = get_status_from_sheets(img_url)
+                task_id = row["task_id"]
+                
+                img_url = clean_text(row.get("Img", ""))
+                if not img_url:
+                    img_url = clean_text(row.get("TaskImageUrl", ""))
+                
+                # Leer status desde Sheets
+                try:
+                    status_sheets = get_status_from_sheets(img_url)
+                except Exception as e:
+                    print(f"⚠️ Error al leer status desde Sheets: {e}")
+                    status_sheets = None
+                
+                if status_sheets:
+                    is_reviewed = True
+                    review = {
+                        "status": status_sheets["status"],
+                        "observaciones": status_sheets.get("observaciones", ""),
+                        "fecha_revision": status_sheets.get("fecha_revision", "")
+                    }
+                else:
+                    is_reviewed = False
+                    review = None
+                
+                raw_poc_id = clean_text(row.get("POC ID"))
+                short_poc_id = extract_short_poc_id(raw_poc_id)
+                client_info = get_client_info(raw_poc_id)
+                
+                response_rows.append({
+                    "row_id": int(row["row_id"]),
+                    "task_id": task_id,
+                    "fecha": formatear_fecha(row.get("Fecha")),
+                    "promotor": clean_text(row.get("Promotor")),
+                    "poc_id": short_poc_id,
+                    "poc_id_completo": raw_poc_id,
+                    "cliente_id": short_poc_id,
+                    "razon_social": client_info.get("nombre") if client_info else "SIN DATO",
+                    "direccion": client_info.get("direccion") if client_info else "SIN DATO",
+                    "detalle_tarea": clean_text(row.get("Detalle Tarea")),
+                    "imagen": img_url,
+                    "revisado": is_reviewed,
+                    "status": review.get("status") if review else None,
+                    "observaciones": review.get("observaciones") if review else "",
+                    "fecha_revision": review.get("fecha_revision") if review else None
+                })
+                    
             except Exception as e:
-                print(f"⚠️ Error al leer status desde Sheets: {e}")
-                status_sheets = None
-            
-            if status_sheets:
-                is_reviewed = True
-                review = {
-                    "status": status_sheets["status"],
-                    "observaciones": status_sheets.get("observaciones", ""),
-                    "fecha_revision": status_sheets.get("fecha_revision", "")
-                }
-            else:
-                is_reviewed = False
-                review = None
-            
-            raw_poc_id = clean_text(row.get("POC ID"))
-            short_poc_id = extract_short_poc_id(raw_poc_id)
-            client_info = get_client_info(raw_poc_id)
-            
-            response_rows.append({
-                "row_id": int(row["row_id"]),
-                "task_id": task_id,
-                "fecha": formatear_fecha(row.get("Fecha")),
-                "promotor": clean_text(row.get("Promotor")),
-                "poc_id": short_poc_id,
-                "poc_id_completo": raw_poc_id,
-                "cliente_id": short_poc_id,
-                "razon_social": client_info.get("nombre") if client_info else "SIN DATO",
-                "direccion": client_info.get("direccion") if client_info else "SIN DATO",
-                "detalle_tarea": clean_text(row.get("Detalle Tarea")),
-                "imagen": img_url,
-                "revisado": is_reviewed,
-                "status": review.get("status") if review else None,
-                "observaciones": review.get("observaciones") if review else "",
-                "fecha_revision": review.get("fecha_revision") if review else None
-            })
+                print(f"❌ Error procesando fila: {e}")
+                continue
         
         print(f"✅ Respondiendo con {len(response_rows)} tareas")
+        print("=" * 50)
         return jsonify(response_rows)
         
     except Exception as e:
-        print(f"❌ Error en api_tasks: {e}")
+        print(f"❌❌❌ ERROR GRAVE en api_tasks: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({"error": str(e), "no_data": True}), 500
