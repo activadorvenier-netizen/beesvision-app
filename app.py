@@ -602,27 +602,29 @@ def api_export_reviews():
             return jsonify({"error": "No hay revisiones para exportar"}), 404
         
         # =========================================================
-        # OBTENER DATOS DEL EXCEL PARA ENRIQUECER EL REPORTE
+        # OBTENER DATOS DEL EXCEL INDEXADOS POR ID Tarea
         # =========================================================
         task_data = {}
         if _cached_df is not None and _data_loaded:
             for _, row in _cached_df.iterrows():
-                raw_poc_id = clean_text(row.get("POC ID", ""))
-                short_poc_id = extract_short_poc_id(raw_poc_id)
-                client_info = get_client_info(raw_poc_id) if raw_poc_id else None
-                img_url = clean_text(row.get("Img", ""))
-                if not img_url:
-                    img_url = clean_text(row.get("TaskImageUrl", ""))
-                
-                task_data[row["task_id"]] = {
-                    "fecha": formatear_fecha(row.get("Fecha")),
-                    "promotor": row.get("Promotor", ""),
-                    "poc_id_completo": raw_poc_id,
-                    "razon_social": client_info.get("nombre") if client_info else "",
-                    "direccion": client_info.get("direccion") if client_info else "",
-                    "detalle_tarea": row.get("Detalle Tarea", ""),
-                    "imagen": img_url
-                }
+                id_tarea = clean_text(row.get("ID Tarea", ""))
+                if id_tarea:
+                    raw_poc_id = clean_text(row.get("POC ID", ""))
+                    short_poc_id = extract_short_poc_id(raw_poc_id)
+                    client_info = get_client_info(raw_poc_id) if raw_poc_id else None
+                    img_url = clean_text(row.get("Img", ""))
+                    if not img_url:
+                        img_url = clean_text(row.get("TaskImageUrl", ""))
+                    
+                    task_data[id_tarea] = {
+                        "fecha": formatear_fecha(row.get("Fecha")),
+                        "promotor": row.get("Promotor", ""),
+                        "poc_id_completo": raw_poc_id,
+                        "razon_social": client_info.get("nombre") if client_info else "",
+                        "direccion": client_info.get("direccion") if client_info else "",
+                        "detalle_tarea": row.get("Detalle Tarea", ""),
+                        "imagen": img_url
+                    }
         # =========================================================
         
         export_data = []
@@ -631,7 +633,7 @@ def api_export_reviews():
             task_info = task_data.get(id_tarea, {})
             
             export_data.append({
-                "Fecha": rev.get("Fecha", ""),
+                "Fecha": task_info.get("fecha", rev.get("Fecha", "")),
                 "Cliente ID": task_info.get("poc_id_completo", ""),
                 "Razón Social": task_info.get("razon_social", ""),
                 "Direccion": task_info.get("direccion", ""),
