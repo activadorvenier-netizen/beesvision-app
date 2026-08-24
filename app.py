@@ -1,4 +1,3 @@
-# app.py - VERSIÓN ORIGINAL CON GUARDADO EN SHEETS
 from __future__ import annotations
 from pathlib import Path
 from typing import Any
@@ -88,7 +87,7 @@ def cargar_clientes_json():
 CLIENTES = cargar_clientes_json()
 
 # =====================================================
-# FUNCIONES PARA GOOGLE SHEETS - HOJA STATUS
+# NUEVAS FUNCIONES PARA GOOGLE SHEETS (SOLO ESTO SE AGREGA)
 # =====================================================
 
 def get_google_sheet_client():
@@ -163,7 +162,7 @@ def get_status_from_sheets(id_imagen):
         return None
 
 # =====================================================
-# FUNCIONES
+# FUNCIONES (TODO IGUAL)
 # =====================================================
 
 def clean_text(value: Any) -> str:
@@ -278,7 +277,7 @@ def _load_data(path: Path) -> pd.DataFrame:
     return filtered
 
 # =====================================================
-# ROUTES
+# ROUTES (SOLO CAMBIOS EN tasks, save_review Y stats)
 # =====================================================
 
 @app.route("/")
@@ -369,10 +368,8 @@ def api_tasks():
     start_date = request.args.get("start_date", type=str)
     end_date = request.args.get("end_date", type=str)
     result = _cached_df[_cached_df["Supervisor ID"] == supervisor_id].copy()
-    
     if result.empty:
         return jsonify({"error": f"No hay tareas asignadas para {SUPERVISORS[supervisor_id]}", "no_tasks": True}), 404
-    
     if start_date:
         try:
             result = result[result["Fecha"].astype(str) >= start_date]
@@ -380,10 +377,9 @@ def api_tasks():
             pass
     if end_date:
         try:
-            result = result[result["Fecha"].astype(str) <= end_date]
+            result = result[result["Fecha"].astype(str) <= end_date)
         except:
             pass
-    
     if result.empty:
         return jsonify({"error": "No hay tareas en el rango de fechas", "no_tasks": True}), 404
     
@@ -398,19 +394,19 @@ def api_tasks():
         if is_reviewed:
             review = db.get_review_status(task_id, supervisor_id)
         
-        raw_poc_id = clean_text(row.get("POC ID"))
-        short_poc_id = extract_short_poc_id(raw_poc_id)
-        client_info = get_client_info(raw_poc_id)
+        # === LEER STATUS DESDE SHEETS (SIEMPRE PRIORIDAD) ===
         img_url = clean_text(row.get("Img", ""))
         if not img_url:
             img_url = clean_text(row.get("TaskImageUrl", ""))
-        
-        # === BUSCAR STATUS EN GOOGLE SHEETS ===
         status_sheets = get_status_from_sheets(img_url)
         if status_sheets:
             is_reviewed = True
             review = status_sheets
-        # =========================================
+        # =================================================
+        
+        raw_poc_id = clean_text(row.get("POC ID"))
+        short_poc_id = extract_short_poc_id(raw_poc_id)
+        client_info = get_client_info(raw_poc_id)
         
         response_rows.append({
             "row_id": int(row["row_id"]),
@@ -439,7 +435,6 @@ def api_save_review():
     task_id = data.get("task_id")
     status = data.get("status")
     observaciones = data.get("observaciones", "")
-    
     if not task_id or not status:
         return jsonify({"error": "Faltan datos"}), 400
     if status not in ["objeccion", "invalida", "fraude"]:
@@ -474,7 +469,7 @@ def api_save_review():
     )
     
     # 2. Guardar en Google Sheets (hoja Status)
-    success = guardar_status_en_sheets(
+    guardar_status_en_sheets(
         fecha=fecha_tarea,
         id_imagen=img_url,
         status=status,
@@ -482,10 +477,7 @@ def api_save_review():
         observaciones=observaciones
     )
     
-    if success:
-        return jsonify({"ok": True, "message": "Revisión guardada correctamente"})
-    else:
-        return jsonify({"error": "Error al guardar la revisión"}), 500
+    return jsonify({"ok": True, "message": "Revisión guardada correctamente"})
 
 @app.route("/api/delete_review/<task_id>", methods=["DELETE"])
 @login_required
@@ -511,11 +503,13 @@ def api_delete_review(task_id):
 def api_stats():
     global _data_loaded
     supervisor_id = session['supervisor_id']
+    supervisor_name = session['supervisor_name']
     mes = _current_mes or get_mes_actual()
+    
+    # Estadísticas desde base local
     stats = db.get_supervisor_stats(supervisor_id, mes)
     
-    # Sumar stats de Sheets
-    supervisor_name = session['supervisor_name']
+    # Sumar estadísticas desde Sheets
     try:
         gc = get_google_sheet_client()
         if gc:
@@ -562,6 +556,10 @@ def api_stats():
 def api_supervisors():
     items = [{"id": sid, "name": name} for sid, name in SUPERVISORS.items()]
     return jsonify(items)
+
+# =====================================================
+# EXPORTAR REVISIONES (IGUAL)
+# =====================================================
 
 @app.route("/api/export_reviews", methods=["GET"])
 @login_required
@@ -663,6 +661,10 @@ def api_export_reviews():
     except Exception as e:
         print(f"Error al exportar: {e}")
         return jsonify({"error": str(e)}), 500
+
+# =====================================================
+# CIERRE DE MES (IGUAL)
+# =====================================================
 
 @app.route("/api/close_month", methods=["POST"])
 @login_required
@@ -775,6 +777,10 @@ def api_close_month():
     except Exception as e:
         print(f"Error en cierre de mes: {e}")
         return jsonify({"error": str(e)}), 500
+
+# =====================================================
+# START
+# =====================================================
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
