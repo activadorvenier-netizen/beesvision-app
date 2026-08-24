@@ -3,6 +3,8 @@ import sqlite3
 from datetime import datetime
 from typing import Optional, List, Dict
 from pathlib import Path
+import pandas as pd
+import json
 
 # Obtener la ruta ABSOLUTA del directorio del proyecto
 BASE_DIR = Path(__file__).resolve().parent
@@ -40,6 +42,16 @@ class ReviewDatabase:
                 CREATE INDEX IF NOT EXISTS idx_status ON reviews(status);
                 CREATE INDEX IF NOT EXISTS idx_mes ON reviews(mes_revision);
                 
+                -- Tabla para guardar los datos del Excel
+                CREATE TABLE IF NOT EXISTS excel_data (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    supervisor_id INTEGER NOT NULL,
+                    data_json TEXT NOT NULL,
+                    fecha_carga DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    mes_revision TEXT,
+                    UNIQUE(supervisor_id)
+                );
+                
                 CREATE TABLE IF NOT EXISTS uploaded_files (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     filename TEXT NOT NULL,
@@ -50,6 +62,77 @@ class ReviewDatabase:
                 );
             """)
             print("✅ Base de datos inicializada")
+    
+    # =====================================================
+    # NUEVAS FUNCIONES PARA GUARDAR/CARGAR EXCEL
+    # =====================================================
+    
+    def guardar_datos_excel(self, supervisor_id: int, df: pd.DataFrame, mes_revision: str) -> bool:
+        """Guardar los datos del Excel en la base de datos"""
+        try:
+            # Convertir DataFrame a JSON
+            data_json = df.to_json(orient='records', date_format='iso')
+            
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT OR REPLACE INTO excel_data 
+                    (supervisor_id, data_json, mes_revision, fecha_carga)
+                    VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+                """, (supervisor_id, data_json, mes_revision))
+                conn.commit()
+                print(f"✅ Datos Excel guardados para supervisor {supervisor_id}: {len(df)} filas")
+                return True
+        except Exception as e:
+            print(f"❌ Error guardando datos Excel: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+    
+    def cargar_datos_excel(self, supervisor_id: int):
+        """Cargar los datos del Excel desde la base de datos"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT data_json, mes_revision, fecha_carga
+                    FROM excel_data
+                    WHERE supervisor_id = ?
+                """, (supervisor_id,))
+                row = cursor.fetchone()
+                
+                if row:
+                    data_json, mes_revision, fecha_carga = row
+                    df = pd.read_json(data_json, orient='records')
+                    print(f"✅ Datos Excel cargados para supervisor {supervisor_id}: {len(df)} filas")
+                    return df, mes_revision, fecha_carga
+                print(f"ℹ️ No hay datos Excel para supervisor {supervisor_id}")
+                return None, None, None
+        except Exception as e:
+            print(f"❌ Error cargando datos Excel: {e}")
+            import traceback
+            traceback.print_exc()
+            return None, None, None
+    
+    def eliminar_datos_excel(self, supervisor_id: int) -> bool:
+        """Eliminar los datos del Excel de la base de datos"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    DELETE FROM excel_data
+                    WHERE supervisor_id = ?
+                """, (supervisor_id,))
+                conn.commit()
+                print(f"✅ Datos Excel eliminados para supervisor {supervisor_id}")
+                return True
+        except Exception as e:
+            print(f"❌ Error eliminando datos Excel: {e}")
+            return False
+    
+    # =====================================================
+    # FUNCIONES EXISTENTES (sin cambios)
+    # =====================================================
     
     def save_review(self, task_id: str, row_id: int, supervisor_id: int, 
                     supervisor_name: str, status: str, observaciones: str = "",
@@ -66,20 +149,22 @@ class ReviewDatabase:
                 
                 existing = cursor.fetchone()
                 
+                fecha_actual = datetime.now().strftime("%d/%m/%Y")
+                
                 if existing:
                     cursor.execute("""
                         UPDATE reviews 
-                        SET status = ?, observaciones = ?, fecha_revision = CURRENT_TIMESTAMP
+                        SET status = ?, observaciones = ?, fecha_revision = ?
                         WHERE task_id = ? AND supervisor_id = ?
-                    """, (status, observaciones, task_id, supervisor_id))
+                    """, (status, observaciones, fecha_actual, task_id, supervisor_id))
                 else:
                     cursor.execute("""
                         INSERT INTO reviews 
                         (task_id, row_id, supervisor_id, supervisor_name, status, 
-                         observaciones, excel_file, mes_revision)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                         observaciones, excel_file, mes_revision, fecha_revision)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, (task_id, row_id, supervisor_id, supervisor_name, status, 
-                          observaciones, excel_file, mes_revision))
+                          observaciones, excel_file, mes_revision, fecha_actual))
                 
                 conn.commit()
                 print(f"✅ Revisión guardada: {task_id} -> {status}")
