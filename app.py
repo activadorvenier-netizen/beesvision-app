@@ -336,13 +336,13 @@ def api_tasks():
     end_date = request.args.get("end_date", type=str)
     result = _cached_df[_cached_df["Supervisor ID"] == supervisor_id].copy()
     
-    # ORDENAR POR FECHA (más antiguas primero)
+    # ORDENAR POR FECHA
     result = result.sort_values(by="Fecha", ascending=True)
     
     if result.empty:
         return jsonify({"error": f"No hay tareas asignadas para {SUPERVISORS[supervisor_id]}", "no_tasks": True}), 404
     
-    # Filtro de fechas
+    # FILTRO DE FECHAS
     if start_date and end_date:
         try:
             result['Fecha_dt'] = pd.to_datetime(result['Fecha'], format='%d/%m/%Y', errors='coerce')
@@ -350,8 +350,7 @@ def api_tasks():
             end_dt = datetime.strptime(end_date, "%d/%m/%Y")
             result = result[(result['Fecha_dt'] >= start_dt) & (result['Fecha_dt'] <= end_dt)]
             result = result.drop(columns=['Fecha_dt'])
-        except Exception as e:
-            print(f"Error en filtro de fechas: {e}")
+        except:
             if start_date:
                 result = result[result["Fecha"].astype(str) >= start_date]
             if end_date:
@@ -375,23 +374,47 @@ def api_tasks():
     
     if result.empty:
         return jsonify({"error": "No hay tareas en el rango de fechas", "no_tasks": True}), 404
-    task_ids = result["task_id"].tolist()
-    pending_tasks = db.get_pending_tasks(supervisor_id, task_ids)
+    
+    # =========================================================
+    # CARGAR TODOS LOS STATUS DE SHEETS UNA SOLA VEZ
+    # =========================================================
+    status_cache = {}
+    try:
+        gc = get_google_sheet_client()
+        if gc:
+            sheet = gc.open_by_key(SHEET_ID)
+            try:
+                worksheet = sheet.worksheet("Status")
+                records = worksheet.get_all_records()
+                for row in records:
+                    id_tarea = row.get("ID Tarea", "")
+                    if id_tarea:
+                        status_cache[id_tarea] = {
+                            "status": row.get("Status", ""),
+                            "supervisor": row.get("Supervisor", ""),
+                            "observaciones": row.get("Observaciones", ""),
+                            "fecha_revision": row.get("Fecha Revision", "")
+                        }
+            except:
+                pass
+    except:
+        pass
+    # =========================================================
+    
     response_rows = []
     for _, row in result.iterrows():
         task_id = row["task_id"]
-        is_reviewed = task_id not in pending_tasks
-        review = None
-        if is_reviewed:
-            review = db.get_review_status(task_id, supervisor_id)
-        
-        # LEER STATUS DESDE SHEETS
         id_tarea = clean_text(row.get("ID Tarea", ""))
-        if id_tarea:
-            status_sheets = get_status_from_sheets(id_tarea)
-            if status_sheets:
-                is_reviewed = True
-                review = status_sheets
+        
+        # Buscar en el caché de Sheets
+        status_info = status_cache.get(id_tarea) if id_tarea else None
+        
+        if status_info:
+            is_reviewed = True
+            review = status_info
+        else:
+            is_reviewed = False
+            review = None
         
         raw_poc_id = clean_text(row.get("POC ID"))
         short_poc_id = extract_short_poc_id(raw_poc_id)
@@ -416,6 +439,7 @@ def api_tasks():
             "observaciones": review.get("observaciones") if review else "",
             "fecha_revision": review.get("fecha_revision") if review else None
         })
+    
     return jsonify(response_rows)
 
 @app.route("/api/save_review", methods=["POST"])
