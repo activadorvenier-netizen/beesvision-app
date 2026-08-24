@@ -454,5 +454,19 @@ def diagnostico():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@app.route("/api/ver")
+@login_required
+def ver():
+    global _cached_df, _data_loaded
+    return jsonify({
+        "data_loaded": _data_loaded,
+        "cached_df_is_none": _cached_df is None,
+        "cached_df_rows": len(_cached_df) if _cached_df is not None else 0,
+        "columns": _cached_df.columns.tolist() if _cached_df is not None else [],
+        "supervisor_id": session.get('supervisor_id'),
+        "supervisor_name": session.get('supervisor_name'),
+        "file_exists": (UPLOAD_DIR / "data.xlsx").exists()
+    })
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
