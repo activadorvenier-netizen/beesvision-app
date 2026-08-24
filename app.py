@@ -192,13 +192,42 @@ def login_required(f):
 
 def _load_data(path: Path) -> pd.DataFrame:
     df = pd.read_excel(path, engine="openpyxl")
+    
+    # Renombrar columna de imagen
     if "TaskImageUrl" in df.columns and "Img" not in df.columns:
         df = df.rename(columns={"TaskImageUrl": "Img"})
     if "Img" not in df.columns:
         df["Img"] = ""
     if "ID Tarea" not in df.columns:
         df["ID Tarea"] = ""
-    return df
+    
+    # Convertir columnas a numérico
+    df["Completada"] = pd.to_numeric(df["Completada"], errors="coerce")
+    df["Validada"] = pd.to_numeric(df["Validada"], errors="coerce")
+    df["Supervisor ID"] = pd.to_numeric(df["Supervisor ID"], errors="coerce")
+    
+    # Función para Visita Valida
+    def is_visita_valida(value):
+        if pd.isna(value):
+            return False
+        if isinstance(value, (int, float)):
+            return float(value) == 1.0
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            return value.strip().upper() in {"VERDADERO", "TRUE", "1", "1.0", "SI", "YES"}
+        return False
+    
+    df["VisitaValidaBool"] = df["Visita Valida"].apply(is_visita_valida)
+    
+    # FILTRAR: Completada = 1, Validada = 0, Visita Valida = True
+    df_filtrado = df[
+        (df["Completada"] == 1.0) &
+        (df["Validada"] == 0.0) &
+        (df["VisitaValidaBool"] == True)
+    ].copy()
+    
+    return df_filtrado
 
 # =====================================================
 # RUTAS
@@ -259,7 +288,7 @@ def api_tasks():
     start_date = request.args.get("start_date", type=str)
     end_date = request.args.get("end_date", type=str)
     
-    # Si existe columna Supervisor ID, filtrar. Si no, usar todo.
+    # Filtrar por supervisor
     if "Supervisor ID" in _cached_df.columns:
         result = _cached_df[_cached_df["Supervisor ID"] == supervisor_id].copy()
         if result.empty:
