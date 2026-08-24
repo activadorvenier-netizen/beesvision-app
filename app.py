@@ -1,4 +1,4 @@
-# app.py - VERSIÓN FINAL QUE FUNCIONA
+# app.py - VERSIÓN DEFINITIVA CON BASE DE DATOS
 from __future__ import annotations
 from pathlib import Path
 from typing import Any
@@ -11,6 +11,7 @@ import io
 import json
 import re
 import os
+import sqlite3
 from tempfile import NamedTemporaryFile
 
 # =====================================================
@@ -36,9 +37,6 @@ SUPERVISORS = {
 app = Flask(__name__)
 app.secret_key = "clave_secreta_para_desarrollo"
 
-_cached_df = None
-_data_loaded = False
-
 # =====================================================
 # CONFIGURACIÓN GOOGLE SHEETS
 # =====================================================
@@ -63,6 +61,64 @@ GOOGLE_SHEETS_CONFIG = {
     "sheet_name": SHEET_NAME,
     "credentials_file": CREDENTIALS_FILE
 }
+
+# =====================================================
+# FUNCIONES BASE DE DATOS
+# =====================================================
+
+DB_PATH = BASE_DIR / "app_data.db"
+
+def init_db():
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS excel_data (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                supervisor_id INTEGER NOT NULL,
+                data_json TEXT NOT NULL,
+                fecha_carga DATETIME DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(supervisor_id)
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS reviews (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                task_id TEXT NOT NULL,
+                supervisor_id INTEGER NOT NULL,
+                status TEXT NOT NULL,
+                observaciones TEXT,
+                fecha_revision DATETIME DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(task_id, supervisor_id)
+            )
+        """)
+
+def guardar_excel_db(supervisor_id, df):
+    try:
+        data_json = df.to_json(orient='records', date_format='iso')
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute("""
+                INSERT OR REPLACE INTO excel_data (supervisor_id, data_json)
+                VALUES (?, ?)
+            """, (supervisor_id, data_json))
+        return True
+    except Exception as e:
+        print(f"Error guardando: {e}")
+        return False
+
+def cargar_excel_db(supervisor_id):
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT data_json FROM excel_data WHERE supervisor_id = ?", (supervisor_id,))
+            row = cursor.fetchone()
+            if row:
+                df = pd.read_json(row[0], orient='records')
+                return df
+        return None
+    except Exception as e:
+        print(f"Error cargando: {e}")
+        return None
+
+init_db()
 
 # =====================================================
 # CLIENTES DESDE JSON
@@ -235,85 +291,108 @@ def api_logout():
 @app.route("/api/has_file")
 @login_required
 def api_has_file():
-    return jsonify({"has_file": False, "data_loaded": False})
+    supervisor_id = session.get('supervisor_id')
+    df = cargar_excel_db(supervisor_id)
+    return jsonify({"has_file": df is not None, "data_loaded": df is not None})
 
 @app.route("/api/upload", methods=["POST"])
 @login_required
 def api_upload():
-    global _cached_df, _data_loaded
-    
     if "file" not in request.files:
         return jsonify({"error": "No se envió archivo"}), 400
     f = request.files["file"]
     if not f.filename.lower().endswith(".xlsx"):
         return jsonify({"error": "El archivo debe ser .xlsx"}), 400
     
-    file_path = UPLOAD_DIR / "data.xlsx"
+    supervisor_id = session.get('supervisor_id')
+    file_path = UPLOAD_DIR / f"data_{supervisor_id}.xlsx"
     f.save(str(file_path))
     
     try:
         df = pd.read_excel(file_path, engine="openpyxl")
         
-        # Guardar en variable global
-        _cached_df = df
-        _data_loaded = True
+        if "TaskImageUrl" in df.columns and "Img" not in df.columns:
+            df = df.rename(columns={"TaskImageUrl": "Img"})
+        if "Img" not in df.columns:
+            df["Img"] = ""
         
-        print(f"✅ Archivo cargado: {len(df)} filas")
-        print(f"📊 Columnas: {df.columns.tolist()}")
+        guardar_excel_db(supervisor_id, df)
         
         return jsonify({"ok": True, "rows": len(df), "message": f"Archivo cargado con {len(df)} registros"})
     except Exception as e:
-        print(f"❌ Error: {e}")
         return jsonify({"error": str(e)}), 500
 
-@app.route("/api/test_tasks")
+@app.route("/api/tasks")
 @login_required
-def test_tasks():
-    """Versión de prueba que devuelve datos SIMPLES"""
-    global _cached_df, _data_loaded
-    
-    print(f"🔍 test_tasks - _data_loaded: {_data_loaded}")
-    print(f"🔍 test_tasks - _cached_df is None: {_cached_df is None}")
-    
-    if not _data_loaded or _cached_df is None:
-        return jsonify({"error": "No hay datos cargados"})
-    
+def api_tasks():
     supervisor_id = session.get('supervisor_id')
+    supervisor_name = session.get('supervisor_name')
     
-    print(f"👤 Supervisor ID: {supervisor_id}")
-    print(f"📊 Columnas: {_cached_df.columns.tolist()}")
+    # Cargar desde base de datos
+    df = cargar_excel_db(supervisor_id)
     
-    # Filtrar
-    if "Supervisor ID" in _cached_df.columns:
-        df_filtrado = _cached_df[_cached_df["Supervisor ID"] == supervisor_id]
+    if df is None:
+        return jsonify({"error": "No hay datos cargados. Sube un archivo Excel.", "no_data": True}), 404
+    
+    start_date = request.args.get("start_date", type=str)
+    end_date = request.args.get("end_date", type=str)
+    
+    # Filtrar por supervisor
+    if "Supervisor ID" in df.columns:
+        result = df[df["Supervisor ID"] == supervisor_id].copy()
     else:
-        df_filtrado = _cached_df
+        result = df.copy()
     
-    if df_filtrado.empty:
-        return jsonify({"error": "No hay tareas para este supervisor"})
+    if result.empty:
+        return jsonify({"error": f"No hay tareas para este supervisor", "no_tasks": True}), 404
     
-    # Devolver SOLO 5 tareas con datos mínimos
-    resultado = []
-    for idx, row in df_filtrado.head(5).iterrows():
-        resultado.append({
-            "index": idx,
-            "fecha": str(row.get("Fecha", "")),
-            "promotor": str(row.get("Promotor", "")),
-            "poc_id": str(row.get("POC ID", "")),
-            "imagen": str(row.get("Img", row.get("TaskImageUrl", "")))
+    if 'Fecha' in result.columns:
+        result = result.sort_values(by="Fecha", ascending=True)
+    
+    if start_date:
+        try:
+            result = result[result["Fecha"].astype(str) >= start_date]
+        except:
+            pass
+    if end_date:
+        try:
+            result = result[result["Fecha"].astype(str) <= end_date]
+        except:
+            pass
+    
+    if result.empty:
+        return jsonify({"error": "No hay tareas en el rango de fechas", "no_tasks": True}), 404
+    
+    response = []
+    for idx, row in result.iterrows():
+        img_url = clean_text(row.get("Img", ""))
+        poc_id = clean_text(row.get("POC ID", ""))
+        
+        status_info = get_status_from_sheets(img_url) if img_url else None
+        
+        response.append({
+            "row_id": idx,
+            "task_id": f"task_{idx}",
+            "fecha": formatear_fecha(row.get("Fecha")),
+            "promotor": clean_text(row.get("Promotor")),
+            "poc_id": extract_short_poc_id(poc_id),
+            "poc_id_completo": poc_id,
+            "cliente_id": extract_short_poc_id(poc_id),
+            "razon_social": get_client_info(poc_id).get("nombre") if get_client_info(poc_id) else "SIN DATO",
+            "direccion": get_client_info(poc_id).get("direccion") if get_client_info(poc_id) else "SIN DATO",
+            "detalle_tarea": clean_text(row.get("Detalle Tarea")),
+            "imagen": img_url,
+            "revisado": status_info is not None,
+            "status": status_info.get("status") if status_info else None,
+            "observaciones": status_info.get("observaciones") if status_info else "",
+            "fecha_revision": status_info.get("fecha_revision") if status_info else None
         })
     
-    return jsonify({
-        "total": len(df_filtrado),
-        "mostrando": len(resultado),
-        "tareas": resultado
-    })
+    return jsonify(response)
 
 @app.route("/api/save_review", methods=["POST"])
 @login_required
 def api_save_review():
-    global _cached_df, _data_loaded
-    
     data = request.json
     task_id = data.get("task_id")
     status = data.get("status")
@@ -323,7 +402,12 @@ def api_save_review():
         return jsonify({"error": "Faltan datos"}), 400
     if status not in ["objeccion", "invalida", "fraude"]:
         return jsonify({"error": "Status inválido"}), 400
-    if not _data_loaded or _cached_df is None:
+    
+    supervisor_id = session.get('supervisor_id')
+    supervisor_name = session.get('supervisor_name')
+    
+    df = cargar_excel_db(supervisor_id)
+    if df is None:
         return jsonify({"error": "No hay datos cargados"}), 404
     
     try:
@@ -331,11 +415,10 @@ def api_save_review():
     except:
         return jsonify({"error": "ID de tarea inválido"}), 404
     
-    if idx >= len(_cached_df):
+    if idx >= len(df):
         return jsonify({"error": "Tarea no encontrada"}), 404
     
-    row = _cached_df.iloc[idx]
-    supervisor_name = session['supervisor_name']
+    row = df.iloc[idx]
     fecha_tarea = formatear_fecha(row.get("Fecha"))
     img_url = clean_text(row.get("Img", row.get("TaskImageUrl", "")))
     
@@ -349,10 +432,10 @@ def api_save_review():
 @app.route("/api/stats")
 @login_required
 def api_stats():
-    global _cached_df, _data_loaded
+    supervisor_id = session.get('supervisor_id')
+    supervisor_name = session.get('supervisor_name')
     
-    supervisor_name = session['supervisor_name']
-    supervisor_id = session['supervisor_id']
+    df = cargar_excel_db(supervisor_id)
     
     stats = {"total": 0, "by_status": {"objeccion": 0, "invalida": 0, "fraude": 0}}
     
@@ -374,7 +457,7 @@ def api_stats():
     except:
         pass
     
-    if not _data_loaded or _cached_df is None:
+    if df is None:
         return jsonify({
             "total_revisados": 0,
             "total_pendientes": 0,
@@ -383,7 +466,7 @@ def api_stats():
             "no_data": True
         })
     
-    total_disponibles = len(_cached_df[_cached_df["Supervisor ID"] == supervisor_id])
+    total_disponibles = len(df[df["Supervisor ID"] == supervisor_id]) if "Supervisor ID" in df.columns else len(df)
     total_pendientes = max(0, total_disponibles - stats["total"])
     porcentaje = round((stats["total"] / total_disponibles * 100) if total_disponibles > 0 else 0, 1)
     
@@ -456,53 +539,23 @@ def api_export_reviews():
         print(f"Error al exportar: {e}")
         return jsonify({"error": str(e)}), 500
 
-@app.route("/api/debug")
-@login_required
-def debug():
-    try:
-        global _cached_df, _data_loaded
-        
-        if not _data_loaded or _cached_df is None:
-            return jsonify({"error": "No hay datos cargados"})
-        
-        supervisor_id = session.get('supervisor_id')
-        
-        resultado = {
-            "supervisor_id": supervisor_id,
-            "total_filas": len(_cached_df),
-            "columnas": _cached_df.columns.tolist(),
-            "supervisores_en_excel": _cached_df["Supervisor ID"].unique().tolist() if "Supervisor ID" in _cached_df.columns else []
-        }
-        
-        if "Supervisor ID" in _cached_df.columns:
-            tareas = _cached_df[_cached_df["Supervisor ID"] == supervisor_id]
-            resultado["tareas_supervisor"] = len(tareas)
-        
-        return jsonify(resultado)
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
 @app.route("/api/test_tasks")
 @login_required
 def test_tasks():
-    """Versión de prueba que devuelve datos SIMPLES"""
-    global _cached_df, _data_loaded
+    supervisor_id = session.get('supervisor_id')
+    df = cargar_excel_db(supervisor_id)
     
-    if not _data_loaded or _cached_df is None:
+    if df is None:
         return jsonify({"error": "No hay datos cargados"})
     
-    supervisor_id = session.get('supervisor_id')
-    
-    # Filtrar
-    if "Supervisor ID" in _cached_df.columns:
-        df_filtrado = _cached_df[_cached_df["Supervisor ID"] == supervisor_id]
+    if "Supervisor ID" in df.columns:
+        df_filtrado = df[df["Supervisor ID"] == supervisor_id]
     else:
-        df_filtrado = _cached_df
+        df_filtrado = df
     
     if df_filtrado.empty:
         return jsonify({"error": "No hay tareas para este supervisor"})
     
-    # Devolver SOLO 5 tareas con datos mínimos
     resultado = []
     for idx, row in df_filtrado.head(5).iterrows():
         resultado.append({
@@ -517,16 +570,6 @@ def test_tasks():
         "total": len(df_filtrado),
         "mostrando": len(resultado),
         "tareas": resultado
-    })
-
-@app.route("/api/estado")
-@login_required
-def estado():
-    global _cached_df, _data_loaded
-    return jsonify({
-        "data_loaded": _data_loaded,
-        "cached_df_is_none": _cached_df is None,
-        "cached_df_rows": len(_cached_df) if _cached_df is not None else 0
     })
 
 if __name__ == "__main__":
