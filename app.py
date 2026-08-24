@@ -392,8 +392,6 @@ def api_tasks():
     if result.empty:
         return jsonify({"error": "No hay tareas en el rango de fechas", "no_tasks": True}), 404
     
-    task_ids = result["task_id"].tolist()
-    
     response_rows = []
     for _, row in result.iterrows():
         task_id = row["task_id"]
@@ -461,8 +459,6 @@ def api_save_review():
         return jsonify({"error": "Tarea no encontrada"}), 404
     
     row = task_row.iloc[0]
-    row_id = int(row["row_id"])
-    supervisor_id = session['supervisor_id']
     supervisor_name = session['supervisor_name']
     
     fecha_tarea = formatear_fecha(row.get("Fecha"))
@@ -470,20 +466,8 @@ def api_save_review():
     if not img_url:
         img_url = clean_text(row.get("TaskImageUrl", ""))
     
-    # 1. Guardar en base de datos local (respaldo)
-    success_local = db.save_review(
-        task_id=task_id,
-        row_id=row_id,
-        supervisor_id=supervisor_id,
-        supervisor_name=supervisor_name,
-        status=status,
-        observaciones=observaciones,
-        excel_file=_current_excel or "data.xlsx",
-        mes_revision=_current_mes or get_mes_actual()
-    )
-    
-    # 2. Guardar en Google Sheets (hoja Status)
-    success_sheets = guardar_status_en_sheets(
+    # GUARDAR SOLO EN GOOGLE SHEETS
+    success = guardar_status_en_sheets(
         fecha=fecha_tarea,
         id_imagen=img_url,
         status=status,
@@ -491,7 +475,7 @@ def api_save_review():
         observaciones=observaciones
     )
     
-    if success_sheets:
+    if success:
         return jsonify({"ok": True, "message": "Revisión guardada correctamente"})
     else:
         return jsonify({"error": "Error al guardar la revisión"}), 500
@@ -522,7 +506,6 @@ def api_stats():
     global _data_loaded
     supervisor_id = session['supervisor_id']
     supervisor_name = session['supervisor_name']
-    mes = _current_mes or get_mes_actual()
     
     # Obtener estadísticas desde Sheets
     stats = {"total": 0, "by_status": {"objeccion": 0, "invalida": 0, "fraude": 0}}
@@ -556,15 +539,16 @@ def api_stats():
     
     total_disponibles = len(_cached_df[_cached_df["Supervisor ID"] == supervisor_id])
     total_pendientes = max(0, total_disponibles - stats["total"])
+    porcentaje = round((stats["total"] / total_disponibles * 100) if total_disponibles > 0 else 0, 1)
     
     return jsonify({
         "total_revisados": stats["total"],
         "total_pendientes": total_pendientes,
         "by_status": stats["by_status"],
-        "porcentaje": round((stats["total"] / total_disponibles * 100) if total_disponibles > 0 else 0, 1),
+        "porcentaje": porcentaje,
         "total_disponibles": total_disponibles,
         "has_data": True,
-        "mes": mes
+        "mes": _current_mes
     })
 
 @app.route("/api/supervisors")
