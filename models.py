@@ -11,7 +11,6 @@ BASE_DIR = Path(__file__).resolve().parent
 
 class ReviewDatabase:
     def __init__(self, db_path=None):
-        # Si no se especifica, usar la ruta ABSOLUTA
         if db_path is None:
             db_path = BASE_DIR / "reviews.db"
         self.db_path = str(db_path)
@@ -64,13 +63,12 @@ class ReviewDatabase:
             print("✅ Base de datos inicializada")
     
     # =====================================================
-    # NUEVAS FUNCIONES PARA GUARDAR/CARGAR EXCEL
+    # FUNCIONES PARA GUARDAR/CARGAR EXCEL
     # =====================================================
     
     def guardar_datos_excel(self, supervisor_id: int, df: pd.DataFrame, mes_revision: str) -> bool:
         """Guardar los datos del Excel en la base de datos"""
         try:
-            # Convertir DataFrame a JSON
             data_json = df.to_json(orient='records', date_format='iso')
             
             with sqlite3.connect(self.db_path) as conn:
@@ -131,7 +129,7 @@ class ReviewDatabase:
             return False
     
     # =====================================================
-    # FUNCIONES EXISTENTES (sin cambios)
+    # FUNCIONES EXISTENTES
     # =====================================================
     
     def save_review(self, task_id: str, row_id: int, supervisor_id: int, 
