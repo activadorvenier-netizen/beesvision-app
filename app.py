@@ -500,5 +500,42 @@ def debug():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@app.route("/api/test_tasks")
+@login_required
+def test_tasks():
+    """Versión de prueba que devuelve datos SIMPLES"""
+    global _cached_df, _data_loaded
+    
+    if not _data_loaded or _cached_df is None:
+        return jsonify({"error": "No hay datos cargados"})
+    
+    supervisor_id = session.get('supervisor_id')
+    
+    # Filtrar
+    if "Supervisor ID" in _cached_df.columns:
+        df_filtrado = _cached_df[_cached_df["Supervisor ID"] == supervisor_id]
+    else:
+        df_filtrado = _cached_df
+    
+    if df_filtrado.empty:
+        return jsonify({"error": "No hay tareas para este supervisor"})
+    
+    # Devolver SOLO 5 tareas con datos mínimos
+    resultado = []
+    for idx, row in df_filtrado.head(5).iterrows():
+        resultado.append({
+            "index": idx,
+            "fecha": str(row.get("Fecha", "")),
+            "promotor": str(row.get("Promotor", "")),
+            "poc_id": str(row.get("POC ID", "")),
+            "imagen": str(row.get("Img", row.get("TaskImageUrl", "")))
+        })
+    
+    return jsonify({
+        "total": len(df_filtrado),
+        "mostrando": len(resultado),
+        "tareas": resultado
+    })
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
