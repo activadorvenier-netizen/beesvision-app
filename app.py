@@ -149,7 +149,8 @@ def get_status_from_sheets(id_tarea):
                 "fecha_revision": row_data[5] if len(row_data) > 5 else None
             }
         return None
-    except:
+    except Exception as e:
+        print(f"❌ Error en get_status_from_sheets: {e}")
         return None
 
 # =====================================================
@@ -344,84 +345,105 @@ def api_upload():
 @login_required
 def api_tasks():
     global _cached_df, _data_loaded
-    if not _data_loaded or _cached_df is None or _cached_df.empty:
-        file_path = UPLOAD_DIR / "data.xlsx"
-        if file_path.exists():
+    try:
+        if not _data_loaded or _cached_df is None or _cached_df.empty:
+            file_path = UPLOAD_DIR / "data.xlsx"
+            if file_path.exists():
+                try:
+                    _cached_df = _load_data(file_path)
+                    _data_loaded = True
+                except Exception as e:
+                    return jsonify({"error": f"Error cargando datos: {str(e)}", "no_data": True}), 404
+            else:
+                return jsonify({"error": "No hay datos cargados", "no_data": True}), 404
+        
+        supervisor_id = session['supervisor_id']
+        start_date = request.args.get("start_date", type=str)
+        end_date = request.args.get("end_date", type=str)
+        result = _cached_df[_cached_df["Supervisor ID"] == supervisor_id].copy()
+        
+        if result.empty:
+            return jsonify({"error": f"No hay tareas asignadas para {SUPERVISORS[supervisor_id]}", "no_tasks": True}), 404
+        
+        if start_date:
             try:
-                _cached_df = _load_data(file_path)
-                _data_loaded = True
+                result = result[result["Fecha"].astype(str) >= start_date]
+            except:
+                pass
+        if end_date:
+            try:
+                result = result[result["Fecha"].astype(str) <= end_date]
+            except:
+                pass
+        
+        if result.empty:
+            return jsonify({"error": "No hay tareas en el rango de fechas", "no_tasks": True}), 404
+        
+        response_rows = []
+        for _, row in result.iterrows():
+            try:
+                task_id = row["task_id"]
+                is_reviewed = False
+                review = None
+                
+                # LEER STATUS DESDE SHEETS USANDO ID Tarea
+                id_tarea = clean_text(row.get("ID Tarea", ""))
+                if id_tarea:
+                    try:
+                        status_sheets = get_status_from_sheets(id_tarea)
+                        if status_sheets:
+                            is_reviewed = True
+                            review = status_sheets
+                    except Exception as e:
+                        print(f"⚠️ Error leyendo status para {id_tarea}: {e}")
+                        # Si falla Sheets, usar base local
+                        task_ids = result["task_id"].tolist()
+                        pending_tasks = db.get_pending_tasks(supervisor_id, task_ids)
+                        is_reviewed = task_id not in pending_tasks
+                        if is_reviewed:
+                            review = db.get_review_status(task_id, supervisor_id)
+                else:
+                    # Si no hay ID Tarea, usar base local
+                    task_ids = result["task_id"].tolist()
+                    pending_tasks = db.get_pending_tasks(supervisor_id, task_ids)
+                    is_reviewed = task_id not in pending_tasks
+                    if is_reviewed:
+                        review = db.get_review_status(task_id, supervisor_id)
+                
+                raw_poc_id = clean_text(row.get("POC ID"))
+                short_poc_id = extract_short_poc_id(raw_poc_id)
+                client_info = get_client_info(raw_poc_id)
+                img_url = clean_text(row.get("Img", ""))
+                if not img_url:
+                    img_url = clean_text(row.get("TaskImageUrl", ""))
+                
+                response_rows.append({
+                    "row_id": int(row["row_id"]),
+                    "task_id": task_id,
+                    "fecha": formatear_fecha(row.get("Fecha")),
+                    "promotor": clean_text(row.get("Promotor")),
+                    "poc_id": short_poc_id,
+                    "poc_id_completo": raw_poc_id,
+                    "cliente_id": short_poc_id,
+                    "razon_social": client_info.get("nombre") if client_info else "SIN DATO",
+                    "direccion": client_info.get("direccion") if client_info else "SIN DATO",
+                    "detalle_tarea": clean_text(row.get("Detalle Tarea")),
+                    "imagen": img_url,
+                    "revisado": is_reviewed,
+                    "status": review.get("status") if review else None,
+                    "observaciones": review.get("observaciones") if review else "",
+                    "fecha_revision": review.get("fecha_revision") if review else None
+                })
             except Exception as e:
-                return jsonify({"error": f"Error cargando datos: {str(e)}", "no_data": True}), 404
-        else:
-            return jsonify({"error": "No hay datos cargados", "no_data": True}), 404
-    
-    supervisor_id = session['supervisor_id']
-    start_date = request.args.get("start_date", type=str)
-    end_date = request.args.get("end_date", type=str)
-    result = _cached_df[_cached_df["Supervisor ID"] == supervisor_id].copy()
-    if result.empty:
-        return jsonify({"error": f"No hay tareas asignadas para {SUPERVISORS[supervisor_id]}", "no_tasks": True}), 404
-    if start_date:
-        try:
-            result = result[result["Fecha"].astype(str) >= start_date]
-        except:
-            pass
-    if end_date:
-        try:
-            result = result[result["Fecha"].astype(str) <= end_date]
-        except:
-            pass
-    if result.empty:
-        return jsonify({"error": "No hay tareas en el rango de fechas", "no_tasks": True}), 404
-    
-    task_ids = result["task_id"].tolist()
-    pending_tasks = db.get_pending_tasks(supervisor_id, task_ids)
-    
-    response_rows = []
-    for _, row in result.iterrows():
-        task_id = row["task_id"]
-        is_reviewed = task_id not in pending_tasks
-        review = None
-        if is_reviewed:
-            review = db.get_review_status(task_id, supervisor_id)
+                print(f"⚠️ Error procesando fila: {e}")
+                continue
         
-        # =========================================================
-        # LEER STATUS DESDE SHEETS USANDO ID Tarea
-        # =========================================================
-        id_tarea = clean_text(row.get("ID Tarea", ""))
-        if id_tarea:
-            status_sheets = get_status_from_sheets(id_tarea)
-            if status_sheets:
-                is_reviewed = True
-                review = status_sheets
-        # =========================================================
-        
-        raw_poc_id = clean_text(row.get("POC ID"))
-        short_poc_id = extract_short_poc_id(raw_poc_id)
-        client_info = get_client_info(raw_poc_id)
-        img_url = clean_text(row.get("Img", ""))
-        if not img_url:
-            img_url = clean_text(row.get("TaskImageUrl", ""))
-        
-        response_rows.append({
-            "row_id": int(row["row_id"]),
-            "task_id": task_id,
-            "fecha": formatear_fecha(row.get("Fecha")),
-            "promotor": clean_text(row.get("Promotor")),
-            "poc_id": short_poc_id,
-            "poc_id_completo": raw_poc_id,
-            "cliente_id": short_poc_id,
-            "razon_social": client_info.get("nombre") if client_info else "SIN DATO",
-            "direccion": client_info.get("direccion") if client_info else "SIN DATO",
-            "detalle_tarea": clean_text(row.get("Detalle Tarea")),
-            "imagen": img_url,
-            "revisado": is_reviewed,
-            "status": review.get("status") if review else None,
-            "observaciones": review.get("observaciones") if review else "",
-            "fecha_revision": review.get("fecha_revision") if review else None
-        })
-    
-    return jsonify(response_rows)
+        return jsonify(response_rows)
+    except Exception as e:
+        print(f"❌ Error en api_tasks: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e), "no_data": True}), 500
 
 @app.route("/api/save_review", methods=["POST"])
 @login_required
