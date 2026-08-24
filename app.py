@@ -1,4 +1,3 @@
-# app.py - VERSIÓN FINAL QUE FUNCIONA
 from __future__ import annotations
 from pathlib import Path
 from typing import Any
@@ -193,17 +192,12 @@ def login_required(f):
 
 def _load_data(path: Path) -> pd.DataFrame:
     df = pd.read_excel(path, engine="openpyxl")
-    
-    # Asegurar columna Img
     if "TaskImageUrl" in df.columns and "Img" not in df.columns:
         df = df.rename(columns={"TaskImageUrl": "Img"})
     if "Img" not in df.columns:
         df["Img"] = ""
-    
-    # Asegurar columna ID Tarea
     if "ID Tarea" not in df.columns:
         df["ID Tarea"] = ""
-    
     return df
 
 # =====================================================
@@ -222,7 +216,7 @@ def api_login():
         return jsonify({"error": "Supervisor no encontrado"}), 404
     session['supervisor_id'] = supervisor_id
     session['supervisor_name'] = SUPERVISORS[supervisor_id]
-    return jsonify({"ok": True})
+    return jsonify({"ok": True, "supervisor_id": supervisor_id, "supervisor_name": SUPERVISORS[supervisor_id]})
 
 @app.route("/api/logout", methods=["POST"])
 def api_logout():
@@ -245,17 +239,13 @@ def api_upload():
         return jsonify({"error": "El archivo debe ser .xlsx"}), 400
     file_path = UPLOAD_DIR / "data.xlsx"
     f.save(str(file_path))
-    
     try:
         _cached_df = _load_data(file_path)
         _data_loaded = True
-        print(f"✅ Archivo cargado: {len(_cached_df)} filas")
-        print(f"📊 Columnas: {_cached_df.columns.tolist()}")
         return jsonify({"ok": True, "rows": len(_cached_df), "message": f"Archivo cargado con {len(_cached_df)} registros"})
     except Exception as e:
         _cached_df = None
         _data_loaded = False
-        print(f"❌ Error: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route("/api/tasks")
@@ -269,9 +259,13 @@ def api_tasks():
     start_date = request.args.get("start_date", type=str)
     end_date = request.args.get("end_date", type=str)
     
-    result = _cached_df[_cached_df["Supervisor ID"] == supervisor_id]
-    if result.empty:
-        return jsonify({"error": "No hay tareas para este supervisor", "no_tasks": True}), 404
+    # Si existe columna Supervisor ID, filtrar. Si no, usar todo.
+    if "Supervisor ID" in _cached_df.columns:
+        result = _cached_df[_cached_df["Supervisor ID"] == supervisor_id].copy()
+        if result.empty:
+            return jsonify({"error": "No hay tareas para este supervisor", "no_tasks": True}), 404
+    else:
+        result = _cached_df.copy()
     
     result = result.sort_values(by="Fecha", ascending=True)
     
@@ -385,7 +379,7 @@ def api_stats():
     if not _data_loaded or _cached_df is None:
         return jsonify({"total_revisados": 0, "total_pendientes": 0, "by_status": {"objecion": 0, "invalida": 0, "fraude": 0}, "porcentaje": 0})
     
-    total_disponibles = len(_cached_df[_cached_df["Supervisor ID"] == supervisor_id])
+    total_disponibles = len(_cached_df[_cached_df["Supervisor ID"] == supervisor_id]) if "Supervisor ID" in _cached_df.columns else len(_cached_df)
     total_pendientes = max(0, total_disponibles - stats["total"])
     porcentaje = round((stats["total"] / total_disponibles * 100) if total_disponibles > 0 else 0, 1)
     
@@ -442,26 +436,6 @@ def api_export_reviews():
         output.seek(0)
         filename = f"reporte_revisiones_{supervisor_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
         return send_file(output, download_name=filename, as_attachment=True, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-@app.route("/api/diagnostico")
-@login_required
-def diagnostico():
-    global _cached_df, _data_loaded
-    try:
-        return jsonify({
-            "data_loaded": _data_loaded,
-            "cached_df_is_none": _cached_df is None,
-            "cached_df_rows": len(_cached_df) if _cached_df is not None else 0,
-            "cached_df_columns": _cached_df.columns.tolist() if _cached_df is not None else [],
-            "cached_df_head": _cached_df.head(2).to_dict('records') if _cached_df is not None and not _cached_df.empty else [],
-            "supervisor_id": session.get('supervisor_id'),
-            "supervisor_name": session.get('supervisor_name'),
-            "tareas_supervisor": len(_cached_df[_cached_df["Supervisor ID"] == session.get('supervisor_id')]) if _cached_df is not None and not _cached_df.empty else 0,
-            "filter_start": request.args.get("start_date"),
-            "filter_end": request.args.get("end_date")
-        })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
