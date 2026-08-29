@@ -584,12 +584,11 @@ if seleccion == "📝 Nuevo Coaching":
                             else:
                                 st.warning("⚠️ Error guardando en RESUMEN")
                             
-                                                       # =========================================================
-                            # ACTUALIZAR CONTROL_COACHINGS (VERSIÓN CORREGIDA)
+                            # =========================================================
+                            # ACTUALIZAR CONTROL_COACHINGS
                             # =========================================================
                             
                             try:
-                                # Determinar coaching
                                 bimestre_num = None
                                 mes = fecha.month
                                 if mes in [1, 2]:
@@ -608,14 +607,12 @@ if seleccion == "📝 Nuevo Coaching":
                                 if bimestre_num:
                                     sheet = conectar_gsheets()
                                     if sheet:
-                                        # Obtener o crear la hoja CONTROL_COACHINGS
                                         try:
                                             ws_control = sheet.worksheet("CONTROL_COACHINGS")
                                         except:
                                             ws_control = sheet.add_worksheet("CONTROL_COACHINGS", rows=100, cols=10)
                                             ws_control.update([["Auditado", "Coaching 1", "Coaching 2", "Coaching 3", "Coaching 4", "Coaching 5", "Coaching 6"]])
                                         
-                                        # Buscar el auditado
                                         datos_control = ws_control.get_all_values()
                                         fila_auditado = None
                                         
@@ -624,24 +621,16 @@ if seleccion == "📝 Nuevo Coaching":
                                                 fila_auditado = i + 1
                                                 break
                                         
-                                        # Si no existe, agregar nueva fila
                                         if fila_auditado is None:
                                             nueva_fila = [st.session_state.selected_auditado] + [""] * 6
                                             ws_control.append_row(nueva_fila)
                                             fila_auditado = len(datos_control) + 1
                                         
-                                        # CORREGIDO: Actualizar usando row y col en lugar de notación A1
-                                        # columna: 1 = Coaching 1 (columna B), 2 = Coaching 2 (columna C), etc.
-                                        columna = bimestre_num + 1  # +1 porque la columna A es el Auditado
-                                        
-                                        # Actualizar la celda usando update_cell (método más seguro)
+                                        columna = bimestre_num + 1
                                         ws_control.update_cell(fila_auditado, columna, str(fecha))
                                         
                                         st.success(f"✅ CONTROL_COACHINGS actualizado: {st.session_state.selected_auditado} - Coaching {bimestre_num} = {fecha}")
                                         
-                                else:
-                                    st.warning("⚠️ No se pudo determinar el bimestre")
-                                    
                             except Exception as e:
                                 st.error(f"❌ Error en CONTROL_COACHINGS: {e}")
                             
@@ -650,7 +639,6 @@ if seleccion == "📝 Nuevo Coaching":
                             # =========================================================
                             
                             try:
-                                # Obtener email del auditado
                                 email_auditado = None
                                 if not df_auditados.empty and "Email" in df_auditados.columns:
                                     email_row = df_auditados[df_auditados["Auditado"] == st.session_state.selected_auditado]
@@ -658,26 +646,8 @@ if seleccion == "📝 Nuevo Coaching":
                                         email_auditado = email_row["Email"].iloc[0]
                                 
                                 if email_auditado:
-                                    # Construir mensaje
                                     categorias_texto = ", ".join(categorias_mejorar) if categorias_mejorar else "No hay categorías a mejorar"
-                                    
-                                    if score >= 85:
-                                        emoji = "🏆 Excelente"
-                                    elif score >= 70:
-                                        emoji = "📊 Buen desempeño"
-                                    else:
-                                        emoji = "📈 Área de oportunidad"
-                                    
-                                    # Aquí llamarías a la función de email
-                                    # Por ahora solo mostramos en consola
                                     st.info(f"📧 Email a {email_auditado}: Score {score:.1f}% - {categorias_texto}")
-                                    
-                                    # Si tienes configurado el webhook, descomenta esto:
-                                    # import requests
-                                    # webhook_url = "TU_WEBHOOK_URL"
-                                    # payload = {...}
-                                    # requests.post(webhook_url, json=payload)
-                                    
                                 else:
                                     st.warning(f"⚠️ No se encontró email para el auditado: {st.session_state.selected_auditado}")
                                     
@@ -701,15 +671,15 @@ if seleccion == "📝 Nuevo Coaching":
                             else:
                                 st.success("🎯 ¡No hay categorías a mejorar!")
 
-                            # Reiniciar formulario - CORREGIDO SIN st.rerun()
+                            # Reiniciar formulario - SIN rerun
                             st.session_state.form_id += 1
                             st.session_state.selected_auditor = ""
                             st.session_state.selected_empresa = ""
                             st.session_state.selected_auditado = ""
                             st.session_state.selected_localidad = ""
                             
-                            time.sleep(0.5)
-                            st.experimental_rerun()
+                            # NO usar rerun aquí - el usuario puede seguir navegando
+                            
                         else:
                             st.error("❌ Error guardando en RESPUESTAS")
     else:
@@ -1600,7 +1570,7 @@ elif seleccion == "🎯 Categorías a Mejorar":
     # CATEGORÍAS ACTUALES (expander)
     # =========================================================
 
-        # =========================================================
+    # =========================================================
     # CATEGORÍAS ACTUALES (expander) - CORREGIDO
     # =========================================================
 
